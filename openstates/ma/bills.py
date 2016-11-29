@@ -102,6 +102,8 @@ class MABillScraper(BillScraper):
         session_for_url =  self.replace_non_digits(session)
         bill_url = u'https://malegislature.gov/Bills/{}/{}'.format(session_for_url, bill_id)
 
+        print bill_url
+
         try:
             response = requests.get(bill_url)
         except requests.exceptions.RequestException as e:
@@ -112,7 +114,11 @@ class MABillScraper(BillScraper):
 
         page = lxml.html.fromstring(html)
 
-        bill_number = page.xpath('//div[contains(@class, "followable")]/h1/text()')[0]
+        if page.xpath('//div[contains(@class, "followable")]/h1/text()'):
+            bill_number = page.xpath('//div[contains(@class, "followable")]/h1/text()')[0]
+        else:
+            self.warning(u'Server Error on {}'.format(bill_url))
+            return False             
 
         bill_title = page.xpath('//div[@id="contentContainer"]/div/div/h2/text()')[0]
 
@@ -158,8 +164,13 @@ class MABillScraper(BillScraper):
         page = lxml.html.fromstring(html)
         cosponsor_rows = page.xpath('//tbody/tr')
         for row in cosponsor_rows:
-            cosponsor_name = row.xpath('td[1]/a/text()')[0]
-            cosponsor_district = row.xpath('td[2]/text()')[0]
+            # careful, not everyone is a linked representative
+            # https://malegislature.gov/Bills/189/S740/CoSponsor
+            cosponsor_name = row.xpath('string(td[1])')
+            cosponsor_district = ''
+            if row.xpath('td[2]/text()'):
+                cosponsor_district = row.xpath('td[2]/text()')[0]
+        
             #Filter the sponsor out of the petitioners list
             if not any(sponsor['name'] == cosponsor_name for sponsor in bill['sponsors']):
                 bill.add_sponsor('cosponsor', cosponsor_name, district=cosponsor_district)
@@ -186,8 +197,9 @@ class MABillScraper(BillScraper):
             action_date = row.xpath('td[1]/text()')[0]
             action_date = datetime.strptime(action_date, '%m/%d/%Y')
 
-            action_actor = row.xpath('td[2]/text()')[0]
-            action_actor = self.chamber_map_reverse[action_actor.strip()]
+            if row.xpath('td[2]/text()'):
+                action_actor = row.xpath('td[2]/text()')[0]
+                action_actor = self.chamber_map_reverse[action_actor.strip()]
 
             action_name = row.xpath('string(td[3])')
 

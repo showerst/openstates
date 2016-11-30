@@ -27,19 +27,6 @@ class MABillScraper(BillScraper):
         # self.retry_attempts = 0
         self.raise_errors = False
 
-    def get_action_pages(self, bill, bill_url):
-        #https://malegislature.gov/Bills/189/S3/BillHistory
-        actions_url = "{}/BillHistory".format(bill_url)
-        page1 = lxml.html.fromstring(self.get(actions_url).text)
-        maxPage = page1.xpath('//ul[contains(@class,"pagination-sm")]/li[last()]/a/@onclick')
-        maxPage = re.sub(r'[^\d]', '', session).strip()
-
-        for ct in range(1, maxPage):
-            #https://malegislature.gov/Bills/189/S3/BillHistory?pageNumber=2
-            print ct
-
-        #attrs = self.categorizer.categorize(action)
-
     def format_bill_number(self, raw):
         return raw.replace('Bill ','').replace('.',' ').strip()
 
@@ -56,6 +43,7 @@ class MABillScraper(BillScraper):
     def scrape(self, chamber, session):
         # for the chamber of the action
         #chamber_map = {'House': 'lower', 'Senate': 'upper', 'Joint': 'joint','Governor': 'executive'}
+        self.scrape_bill(session,'S735',chamber)
 
         # Pull the search page to get the filters
         search_url = 'https://malegislature.gov/Bills/Search'
@@ -67,8 +55,7 @@ class MABillScraper(BillScraper):
 
         lastPage = self.get_max_pages(session, chamber)
 
-        for pageNumber in range(1, lastPage):
-            print pageNumber
+        for pageNumber in range(1, lastPage + 1):
             bills = self.list_bills(session, chamber, pageNumber)
             for bill in bills:
                 bill = self.format_bill_number(bill).replace(' ','')
@@ -137,14 +124,10 @@ class MABillScraper(BillScraper):
         if sponsor:
             sponsor = sponsor[0].strip()
             bill.add_sponsor('primary', sponsor)
-        else:
-            print "No Sponsor"
 
         has_cosponsor = page.xpath('//a[starts-with(normalize-space(.),"Petitioners")]')
         if has_cosponsor:
             self.scrape_cosponsors(bill, bill_url)
-        else:
-            print "Has no Cosponsors"
 
         version = page.xpath("//div[contains(@class, 'modalBtnGroup')]/a[contains(text(), 'Download PDF') and not(@disabled)]/@href")
         if version:
@@ -155,7 +138,7 @@ class MABillScraper(BillScraper):
         self.scrape_actions(bill, bill_url)
 
         self.save_bill(bill)
-        print bill
+        #print bill
 
     def scrape_cosponsors(self, bill, bill_url):
         #https://malegislature.gov/Bills/189/S1194/CoSponsor
@@ -182,10 +165,11 @@ class MABillScraper(BillScraper):
         
         max_page = page.xpath('//ul[contains(@class,"pagination-sm")]/li[last()]/a/@onclick')
         if max_page:
-            max_page = re.sub(r'[^\d]', '', max_page).strip()
-            for counter in range(2, max_page):
+            max_page = re.sub(r'[^\d]', '', max_page[0]).strip()
+            for counter in range(2, int(max_page)+1):
+                page = self.scrape_action_page(bill, bill_url, counter)
                 #https://malegislature.gov/Bills/189/S3/BillHistory?pageNumber=2
-                print counter
+
 
     def scrape_action_page(self, bill, bill_url, page_number):
         actions_url = "{}/BillHistory?pageNumber={}".format(bill_url, page_number)
@@ -204,8 +188,6 @@ class MABillScraper(BillScraper):
             action_name = row.xpath('string(td[3])')
 
             attrs = self.categorizer.categorize(action_name)
-            print action_name
-            print attrs
 
             #TODO: categorizse action
             bill.add_action(action_actor, action_name, action_date, **attrs)

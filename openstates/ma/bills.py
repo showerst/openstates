@@ -43,7 +43,7 @@ class MABillScraper(BillScraper):
     def scrape(self, chamber, session):
         # for the chamber of the action
         #chamber_map = {'House': 'lower', 'Senate': 'upper', 'Joint': 'joint','Governor': 'executive'}
-        self.scrape_bill(session,'S735',chamber)
+        #self.scrape_bill(session,'S11',chamber)
 
         # Pull the search page to get the filters
         search_url = 'https://malegislature.gov/Bills/Search'
@@ -109,7 +109,9 @@ class MABillScraper(BillScraper):
 
         bill_title = page.xpath('//div[@id="contentContainer"]/div/div/h2/text()')[0]
 
-        bill_summary = page.xpath('//p[@id="pinslip"]/text()')[0]
+        bill_summary = ''
+        if page.xpath('//p[@id="pinslip"]/text()'):
+            bill_summary = page.xpath('//p[@id="pinslip"]/text()')[0]
 
         bill = Bill(session, chamber, self.format_bill_number(bill_number), bill_title,
                     summary=bill_summary)

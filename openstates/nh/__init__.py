@@ -20,7 +20,9 @@ metadata = {
         {'name': '2013-2014', 'sessions': ['2013', '2014'],
          'start_year': 2013, 'end_year': 2014},
         {'name': '2015-2016', 'sessions': ['2015', '2016'],
-         'start_year': 2015, 'end_year': 2016}
+         'start_year': 2015, 'end_year': 2016},
+        {'name': '2017-2018', 'sessions': ['2017'],
+         'start_year': 2017, 'end_year': 2018} 
     ],
     'session_details': {
         '2011': {'display_name': '2011 Regular Session',
@@ -48,7 +50,11 @@ metadata = {
         '2016': {'display_name': '2016 Regular Session',
                  'zip_url': 'http://gencourt.state.nh.us/downloads/2016%20Session%20Bill%20Status%20Tables.zip',
                  '_scraped_name': '2016 Session',
-                },                
+                },            
+        '2017': {'display_name': '2017 Regular Session',
+                 'zip_url': 'http://gencourt.state.nh.us/downloads/2017%20Session%20Bill%20Status%20Tables.zip',
+                '_scraped_name': '2017 Session',
+                }, 
     },
     'feature_flags': ['subjects', 'influenceexplorer'],
     '_ignored_scraped_sessions': ['2013 Session'],
@@ -58,6 +64,8 @@ def session_list():
     from billy.scrape.utils import url_xpath
     zips = url_xpath('http://gencourt.state.nh.us/downloads/',
                      '//a[contains(@href, "Bill%20Status%20Tables")]/text()')
+    #Manual add for 2017 until they have some bulk data
+    zips.append('2017 Session Bill Status Tables.zip')
     return [zip.replace(' Bill Status Tables.zip', '') for zip in zips]
 
 def extract_text(doc, data):

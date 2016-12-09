@@ -113,7 +113,9 @@ class MABillScraper(BillScraper):
         if page.xpath('//p[@id="pinslip"]/text()'):
             bill_summary = page.xpath('//p[@id="pinslip"]/text()')[0]
 
-        bill = Bill(session, chamber, self.format_bill_number(bill_number), bill_title,
+        bill_id = re.sub(r'[^S|H|\d]','',bill_id)
+
+        bill = Bill(session, chamber,bill_id, bill_title,
                     summary=bill_summary)
         bill.add_source(bill_url)
 

@@ -1,8 +1,10 @@
+import sys
 import datetime
 import ftplib
 import re
 import time
 import xml.etree.cElementTree as etree
+import lxml
 
 from billy.scrape import ScrapeError
 from billy.scrape.bills import BillScraper, Bill
@@ -53,11 +55,14 @@ class TXBillScraper(BillScraper):
 
     def scrape(self, session, chambers):
         self.validate_session(session)
-
+        
         session_code = session
         if len(session_code) == 2:
             session_code = session_code + 'R'
         assert len(session_code) == 3, "Unable to handle the session name"
+
+        self.scrape_prefiles(session_code)
+        sys.exit()
 
         self.versions = []
         version_files = self._get_ftp_files(self._FTP_ROOT,
@@ -272,3 +277,83 @@ class TXBillScraper(BillScraper):
                                  official_type='cosponsor')
 
         self.save_bill(bill)
+
+    def scrape_prefiles(self, session):
+
+        today = datetime.date.today()
+        #11/14/2016
+        formatted_date = today.strftime('%m/%d/%Y')
+        
+        prefile_url = 'http://www.capitol.state.tx.us/Reports/Report.aspx?ID=filingDate&LegSess={}&Code={}'.format(session, formatted_date)
+
+        page = self.get(prefile_url).text
+        page = lxml.html.fromstring(page)
+
+        for table in page.xpath("//table"):
+            bill_link = table.xpath("tr[1]/td[1]/a")[0]
+
+            url = bill_link.xpath("@href")[0].strip()
+
+            bill_title = table.xpath("tr[3]/td[3]/text()")[0].strip()
+
+            bill_id = bill_link.xpath("text()")[0].strip()
+
+            if bill_id[1] == 'B':
+                bill_type = ['bill']
+            elif bill_id[1] == 'R':
+                bill_type = ['resolution']
+            elif bill_id[1:3] == 'CR':
+                bill_type = ['concurrent resolution']
+            elif bill_id[1:3] == 'JR':
+                bill_type = ['joint resolution']
+            else:
+                raise ScrapeError("Invalid bill_id: %s" % bill_id)
+
+            chamber = self.CHAMBERS[bill_id[0]]
+
+            bill_session = session[:2]
+
+            bill = Bill(bill_session, chamber, bill_id, bill_title, type=bill_type)
+
+            bill.add_source(prefile_url)
+
+            action = table.xpath("tr[2]/td[3]/text()")[0].strip()
+
+            act_date = datetime.datetime.strptime(action[:10], "%m/%d/%Y").date()
+
+            bill.add_action(chamber, action,
+                            act_date, type="bill:filed")
+
+            author = table.xpath("tr[1]/td[3]/text()")[0].strip()
+
+            bill.add_sponsor('primary', author, official_type='author')
+
+            clean_id = bill_id.replace(" ", "")
+
+            text_url = 'http://www.legis.state.tx.us/BillLookup/Text.aspx?LegSess={}&Bill={}'.format(session, clean_id)
+
+            versions_page = self.get(text_url).text
+            versions_page = lxml.html.fromstring(versions_page)
+
+            version_links = versions_page.xpath("//a[@accesskey='u']")
+            for link in version_links:
+                version_url = link.xpath('@href')[0]
+                version_url = '{}{}'.format('http://www.legis.state.tx.us', version_url)
+                version_text = 'Introduced'
+
+                version_type = ''
+
+                if '.htm' in version_url:
+                    version_type = 'text/html'
+                elif '.pdf' in version_url:
+                    version_type = 'application/pdf'
+                elif '.doc' in version_url:
+                    version_type = 'application/msword'
+
+                bill.add_version(
+                    name=version_text,
+                    url=version_url,
+                    mimetype=version_type
+                )
+
+            self.save_bill(bill)

@@ -30,6 +30,9 @@ metadata = dict(
         {'name': '84',
          'sessions': ['84'],
          'start_year': 2015, 'end_year': 2015,},
+        {'name': '85',
+         'sessions': ['85'],
+         'start_year': 2017, 'end_year': 2017,},         
         ],
     session_details={
         '81': {'start_date': datetime.date(2009, 1, 13),
@@ -77,6 +80,12 @@ metadata = dict(
                'display_name': '84th Legislature (2015)',
                '_scraped_name': '84(R) - 2015',
               },
+        '85': {'start_year': 2017,
+               'end_year': 2017,
+               'type': 'primary',
+               'display_name': '85th Legislature (2017)',
+               '_scraped_name': '85(R) - 2017',
+              },              
     },
     feature_flags=['events', 'subjects', 'capitol_maps', 'influenceexplorer'],
     capitol_maps=[

@@ -1,18 +1,18 @@
-import pytz
 import datetime as dt
 
-import scrapelib
+from billy.scrape.events import Event, EventScraper
 from openstates.utils import LXMLMixin
-from pupa.scrape import Scraper, Event
+import scrapelib
+import pytz
 
 
 calurl = "http://committeeschedule.legis.wisconsin.gov/?filter=Upcoming&committeeID=-1"
 
+class WIEventScraper(EventScraper, LXMLMixin):
+    jurisdiction = 'wi'
+    _tz = pytz.timezone('US/Eastern')
 
-class WIEventScraper(Scraper, LXMLMixin):
-    _tz = pytz.timezone('US/Central')
-
-    def scrape_participants(self, href):
+    def scrape_participants(self, session, href):
         try:
             page = self.lxmlize(href)
         except scrapelib.HTTPError:
@@ -39,7 +39,7 @@ class WIEventScraper(Scraper, LXMLMixin):
             })
         return ret
 
-    def scrape(self):
+    def scrape(self, session, chambers):
         page = self.lxmlize(calurl)
         events = page.xpath("//table[@class='agenda-body']//tr")[1:]
 
@@ -51,7 +51,7 @@ class WIEventScraper(Scraper, LXMLMixin):
                 raise Exception
 
             comit_url = comit_url[0]
-            who = self.scrape_participants(comit_url.attrib['href'])
+            who = self.scrape_participants(session, comit_url.attrib['href'])
 
             tds = event.xpath("./*")
             date = tds[0].text_content().strip()
@@ -71,20 +71,16 @@ class WIEventScraper(Scraper, LXMLMixin):
             when = ", ".join([date, str(dt.datetime.now().year), time])
             when = dt.datetime.strptime(when, "%a %b %d, %Y, %I:%M %p")
 
-            event = Event(
-                name=name,
-                location_name=where,
-                start_time=self._tz.localize(when),
-                timezone=self._tz.zone,
-            )
+            event = Event(session, when, 'committee:meeting', name,
+                          location=where, link=notice)
 
             event.add_source(calurl)
-
-            event.add_committee(cttie, note='host')
-
-            event.add_document("notice", notice, media_type='application/pdf')
+            event.add_participant('host', cttie, 'committee',
+                                  chamber=cttie_chamber)
+            event.add_document("notice", notice, mimetype='application/pdf')
 
             for thing in who:
-                event.add_person(thing['name'])
+                event.add_participant(thing['title'], thing['name'],
+                                      'legislator', chamber=cttie_chamber)
 
-            yield event
+            self.save_event(event)

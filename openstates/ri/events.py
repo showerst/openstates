@@ -1,37 +1,39 @@
-import re
 import datetime as dt
+import re 
 
-import pytz
-from pupa.scrape import Scraper, Event
-
+from billy.scrape import NoDataForPeriod
+from billy.scrape.events import Event, EventScraper
 from openstates.utils import LXMLMixin
 
+import lxml.html
+import pytz
 
 agenda_url = "http://status.rilin.state.ri.us/agendas.aspx"
 column_order = {
-    "upper": 1,
-    "other": 2,
-    "lower": 0
+    "upper" : 1,
+    "other" : 2,
+    "lower" : 0
 }
 
 replace = {
-    "House Joint Resolution No.": "HJR",
-    "House Resolution No.": "HR",
-    "House Bill No.": "HB",
+    "House Joint Resolution No." : "HJR",
+    "House Resolution No." : "HR",
+    "House Bill No." : "HB",
 
-    "Senate Joint Resolution No.": "SJR",
-    "Senate Resolution No.": "SR",
-    "Senate Bill No.": "SB",
-    u"\xa0": " ",
-    "SUB A": "",
+    "Senate Joint Resolution No." : "SJR",
+    "Senate Resolution No." : "SR",
+    "Senate Bill No." : "SB",
+    u"\xa0" : " ",
+    "SUB A" : "",
     "SUB A as amended": ""
 }
 
+class RIEventScraper(EventScraper, LXMLMixin):
+    jurisdiction = 'ri'
 
-class RIEventScraper(Scraper, LXMLMixin):
     _tz = pytz.timezone('US/Eastern')
 
-    def scrape_agenda(self, url):
+    def scrape_agenda(self, url, session):
         page = self.lxmlize(url)
         # Get the date/time info:
         date_time = page.xpath("//table[@class='time_place']")
@@ -55,7 +57,7 @@ class RIEventScraper(Scraper, LXMLMixin):
             if am_pm_srch:
                 time = ' '.join([start, am_pm_srch.group().upper()])
             else:
-                time = start
+                time = start 
 
         fmts = [
             "%A, %B %d, %Y",
@@ -63,21 +65,22 @@ class RIEventScraper(Scraper, LXMLMixin):
             "%A, %B %d, %Y %I:%M",
         ]
 
+        kwargs = {}
         event_desc = "Meeting Notice"
         if 'Rise' in time:
             datetime = date
             event_desc = "Meeting Notice: Starting at {}".format(time)
         else:
-            datetime = "%s %s" % (date, time)
+            datetime = "%s %s" % ( date, time )
         if "CANCELLED" in datetime.upper():
             return
 
         transtable = {
-            "P.M": "PM",
-            "PM.": "PM",
-            "P.M.": "PM",
-            "A.M.": "AM",
-            "POSTPONED": "",
+            "P.M" : "PM",
+            "PM." : "PM",
+            "P.M." : "PM",
+            "A.M." : "AM",
+            "POSTPONED" : "",
             "RESCHEDULED": "",
             "and Rise of the Senate": "",
         }
@@ -93,54 +96,54 @@ class RIEventScraper(Scraper, LXMLMixin):
             except ValueError:
                 continue
 
-        event = Event(
-            name=event_desc,
-            start_time=self._tz.localize(datetime),
-            timezone=self._tz.zone,
-            location_name=where,
-        )
+        event = Event(session, datetime, 'committee:meeting',
+                      event_desc, location=where, **kwargs)
         event.add_source(url)
         # aight. Let's get us some bills!
         bills = page.xpath("//b/a")
         for bill in bills:
             bill_ft = bill.attrib['href']
-            event.add_document(
-                bill.text_content(), bill_ft,
-                media_type="application/pdf")
+            event.add_document(bill.text_content(), bill_ft, type="full-text",
+                               mimetype="application/pdf")
             root = bill.xpath('../../*')
-            root = [x.text_content() for x in root]
+            root = [ x.text_content() for x in root ]
             bill_id = "".join(root)
 
             if "SCHEDULED FOR" in bill_id:
                 continue
 
-            descr = bill.getparent().getparent().getparent().getnext().getnext().text_content()
+            descr = bill.getparent().getparent().getparent().getnext().getnext(
+                ).text_content()
 
             for thing in replace:
                 bill_id = bill_id.replace(thing, replace[thing])
 
-            item = event.add_agenda_item(descr)
-            item.add_bill(bill.text_content())
-
+            event.add_related_bill(bill_id,
+                                   description=descr,
+                                   type='consideration')
         committee = page.xpath("//span[@id='lblSession']")[0].text_content()
+        chambers = {
+            "house" : "lower",
+            "joint" : "joint",
+            "senate" : "upper"
+        }
+        chamber = "other"
+        for key in chambers:
+            if key in committee.lower():
+                chamber = chambers[key]
 
-        event.add_participant(committee, 'committee', note='host')
+        event.add_participant("host", committee, 'committee', chamber=chamber)
 
-        yield event
+        self.save_event(event)
 
-    def scrape_agenda_dir(self, url):
+    def scrape_agenda_dir(self, url, session):
         page = self.lxmlize(url)
         rows = page.xpath("//table[@class='agenda_table']/tr")[2:]
         for row in rows:
             url = row.xpath("./td")[-1].xpath(".//a")[0]
-            yield from self.scrape_agenda(url.attrib['href'])
+            self.scrape_agenda(url.attrib['href'], session)
 
-    def scrape(self, chamber=None):
-        chambers = [chamber] if chamber is not None else ['upper', 'lower']
-        for chamber in chambers:
-            yield from self.scrape_chamber(chamber)
-
-    def scrape_chamber(self, chamber):
+    def scrape(self, chamber, session):
         offset = column_order[chamber]
         page = self.lxmlize(agenda_url)
         rows = page.xpath("//table[@class='agenda_table']/tr")[1:]
@@ -148,4 +151,4 @@ class RIEventScraper(Scraper, LXMLMixin):
             ctty = row.xpath("./td")[offset]
             to_scrape = ctty.xpath("./a")
             for page in to_scrape:
-                yield from self.scrape_agenda_dir(page.attrib['href'])
+                self.scrape_agenda_dir(page.attrib['href'], session)

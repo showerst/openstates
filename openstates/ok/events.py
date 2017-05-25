@@ -1,20 +1,20 @@
 import re
 import datetime
 import time
-import pytz
+
+from billy.scrape.events import EventScraper, Event
+
 import lxml.html
-from pupa.scrape import Scraper, Event
 
 
-class OKEventScraper(Scraper):
-    _tz = pytz.timezone('CST6CDT')
+class OKEventScraper(EventScraper):
+    jurisdiction = 'ok'
 
-    def scrape(self, chamber=None):
-        chambers = [chamber] if chamber is not None else ['upper']
-        for chamber in chambers:
-            yield from self.scrape_upper()
+    def scrape(self, chamber, session):
+        if chamber == 'upper':
+            self.scrape_upper(session)
 
-    def scrape_upper(self):
+    def scrape_upper(self, session):
         url = "http://www.oksenate.gov/Committees/meetingnotices.htm"
         page = lxml.html.fromstring(self.get(url).text)
         page.make_links_absolute(url)
@@ -29,6 +29,7 @@ class OKEventScraper(Scraper):
             when = datetime.datetime.strptime(when, "%A, %B %d, %Y")
 
             lines = filter(None, [x.strip() for x in data.splitlines()])
+
             time_ = re.search(r'^\s*TIME:\s+(.+?)\s+\x96', data, re.M).group(1)
             time_ = time_.replace('a.m.', 'AM').replace('p.m.', 'PM')
             time_ = time.strptime(time_, '%I:%M %p')
@@ -39,10 +40,8 @@ class OKEventScraper(Scraper):
             where = re.search(r'^\s*PLACE:\s+(.+)', data, re.M).group(1)
             where = where.strip()
 
-            event = Event(name=title,
-                          start_time=self._tz.localize(when),
-                          timezone=self._tz.zone,
-                          location_name=where)
+            event = Event(session, when, 'committee:meeting', title,
+                          location=where)
             event.add_source(url)
 
-            yield event
+            self.save_event(event)

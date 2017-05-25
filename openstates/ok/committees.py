@@ -1,25 +1,29 @@
 import re
+
+from billy.scrape import NoDataForPeriod
+from billy.scrape.committees import CommitteeScraper, Committee
+
 import lxml.html
-from pupa.scrape import Scraper, Organization
-from .utils import proxy_house_url
 
 
-class OKCommitteeScraper(Scraper):
+class OKCommitteeScraper(CommitteeScraper):
+    jurisdiction = "ok"
+    latest_only = True
 
-    def scrape(self, chamber=None):
-        chambers = [chamber] if chamber is not None else ['upper', 'lower']
-        for chamber in chambers:
-            yield from getattr(self, 'scrape_' + chamber)()
+    def scrape(self, chamber, term):
+        if chamber == "upper":
+            self.scrape_upper()
+        elif chamber == "lower":
+            self.scrape_lower()
 
     def scrape_lower(self):
         url = "http://www.okhouse.gov/Committees/Default.aspx"
-        page = lxml.html.fromstring(self.get(proxy_house_url(url)).text)
+        page = lxml.html.fromstring(self.get(url).text)
         page.make_links_absolute(url)
 
         parents = {}
 
-        for link in page.xpath("//table[@id='ctl00_ContentPlace"
-                               "Holder1_dgrdCommittee_ctl00']//a[contains(@href, 'Members')]"):
+        for link in page.xpath("//table[@id='ctl00_ContentPlaceHolder1_dgrdCommittee_ctl00']//a[contains(@href, 'Members')]"):
             name = link.xpath("string()").strip()
 
             if 'Members' in name or 'Conference' in name:
@@ -35,10 +39,10 @@ class OKCommitteeScraper(Scraper):
             else:
                 parent = parents[comm_id]
 
-            yield from self.scrape_lower_committee(name, parent, link.attrib['href'])
+            self.scrape_lower_committee(name, parent, link.attrib['href'])
 
     def scrape_lower_committee(self, name, parent, url):
-        page = lxml.html.fromstring(self.get(proxy_house_url(url)).text)
+        page = lxml.html.fromstring(self.get(url).text)
         page.make_links_absolute(url)
 
         if 'Joint' in name or (parent and 'Joint' in parent):
@@ -47,10 +51,9 @@ class OKCommitteeScraper(Scraper):
             chamber = 'lower'
 
         if parent:
-            comm = Organization(name=parent, chamber=chamber, classification='committee')
-            subcomm = Organization(name=name, parent_id=comm, classification='committee')
+            comm = Committee(chamber, parent, subcommittee=name)
         else:
-            comm = Organization(name=name, chamber=chamber, classification='committee')
+            comm = Committee(chamber, name)
         comm.add_source(url)
 
         xpath = "//a[contains(@href, 'District')]"
@@ -67,16 +70,16 @@ class OKCommitteeScraper(Scraper):
 
             comm.add_member(member, role.lower())
 
-        if not comm._related:
-            if subcomm.name == 'test':
+        if not comm['members']:
+            if comm['subcommittee'] == 'test':
                 # Whoopsie, prod data.
                 return
 
             raise Exception('no members for %s (%s)' % (
-                comm.name, subcomm.name)
+                comm['committee'], comm['subcommittee'])
             )
 
-        yield comm
+        self.save_committee(comm)
 
     def scrape_upper(self):
         url = "http://www.oksenate.gov/Committees/standingcommittees.htm"
@@ -89,12 +92,12 @@ class OKCommitteeScraper(Scraper):
             if 'Committee List' in name:
                 continue
 
-            yield from self.scrape_upper_committee(name, link.attrib['href'])
+            self.scrape_upper_committee(name, link.attrib['href'])
 
     def scrape_upper_committee(self, name, url):
         page = lxml.html.fromstring(self.get(url).text)
 
-        comm = Organization(name=name, chamber='upper', classification='committee')
+        comm = Committee('upper', name)
         comm.add_source(url)
 
         for link in page.xpath("//a[contains(@href, 'biographies')]"):
@@ -111,6 +114,6 @@ class OKCommitteeScraper(Scraper):
                 role = 'chair'
             comm.add_member(member, role=role)
 
-        if not comm._related:
-            raise Exception('no members for %s', comm.name)
-        yield comm
+        if not comm['members']:
+            raise Exception('no members for %s', comm['name'])
+        self.save_committee(comm)

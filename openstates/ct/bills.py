@@ -4,7 +4,9 @@ import requests
 from operator import itemgetter
 from collections import defaultdict
 
-from pupa.scrape import Scraper, Bill, VoteEvent as Vote
+from billy.scrape import NoDataForPeriod
+from billy.scrape.bills import BillScraper, Bill
+from billy.scrape.votes import Vote
 from .utils import parse_directory_listing, open_csv
 
 import lxml.html
@@ -14,29 +16,27 @@ class SkipBill(Exception):
     pass
 
 
-class CTBillScraper(Scraper):
+class CTBillScraper(BillScraper):
+    jurisdiction = 'ct'
     latest_only = True
 
-    def scrape(self, chamber=None, session=None):
-        if session is None:
-            session = self.latest_session()
-            self.info('no session specified, using %s', session)
-        chambers = [chamber] if chamber is not None else ['upper', 'lower']
-        self.bills = defaultdict(list)
+    def scrape(self, session, chambers):
+        self.bills = {}
         self._committee_names = {}
         self._introducers = defaultdict(set)
         self._subjects = defaultdict(list)
+
         self.scrape_committee_names()
         self.scrape_subjects()
         self.scrape_introducers('upper')
         self.scrape_introducers('lower')
-        yield from self.scrape_bill_info(session, chambers)
+        self.scrape_bill_info(session, chambers)
         for chamber in chambers:
             self.scrape_versions(chamber, session)
         self.scrape_bill_history()
 
-        for bill in self.bills.values():
-            yield bill[0]
+        for bill in self.bills.itervalues():
+            self.save_bill(bill)
 
     def scrape_bill_info(self, session, chambers):
         info_url = "ftp://ftp.cga.ct.gov/pub/data/bill_info.csv"
@@ -49,7 +49,7 @@ class CTBillScraper(Scraper):
             bill_id = row['bill_num']
             chamber = chamber_map[bill_id[0]]
 
-            if chamber not in chambers:
+            if not chamber in chambers:
                 continue
 
             # assert that the bill data is from this session, CT is tricky
@@ -62,36 +62,31 @@ class CTBillScraper(Scraper):
             else:
                 bill_type = 'bill'
 
-            bill = Bill(identifier=bill_id,
-                        legislative_session=session,
-                        title=row['bill_title'],
-                        classification=bill_type,
-                        chamber=chamber)
+            bill = Bill(session, chamber, bill_id,
+                        row['bill_title'],
+                        type=bill_type)
             bill.add_source(info_url)
 
             for introducer in self._introducers[bill_id]:
-                bill.add_sponsorship(name=str(introducer),
-                                     classification='primary',
-                                     primary=True,
-                                     entity_type='person')
+                bill.add_sponsor('primary', introducer,
+                                 official_type='introducer')
 
             try:
-                for subject in self._subjects[bill_id]:
-                    bill.subject.append(subject)
+                self.scrape_bill_page(bill)
 
-                self.bills[bill_id] = [bill, chamber]
+                bill['subjects'] = self._subjects[bill_id]
 
-                yield from self.scrape_bill_page(bill)
+                self.bills[bill_id] = bill
             except SkipBill:
                 self.warning('no such bill: ' + bill_id)
                 pass
 
     def scrape_bill_page(self, bill):
         # Removes leading zeroes in the bill number.
-        bill_number = ''.join(re.split('0+', bill.identifier, 1))
-
+        bill_number = ''.join(re.split('0+', bill['bill_id'], 1))
+        
         url = ("http://www.cga.ct.gov/asp/cgabillstatus/cgabillstatus.asp?selBillType=Bill"
-               "&bill_num=%s&which_year=%s" % (bill_number, bill.legislative_session))
+               "&bill_num=%s&which_year=%s" % (bill_number, bill['session']))
 
         # Connecticut's SSL is causing problems with Scrapelib, so use Requests
         page = requests.get(url, verify=False).text
@@ -103,27 +98,26 @@ class CTBillScraper(Scraper):
         bill.add_source(url)
 
         spon_type = 'primary'
-        if not bill.sponsorships:
+        if not bill['sponsors']:
             for sponsor in page.xpath('//h5[text()="Introduced by: "]/../text()'):
-                sponsor = str(sponsor.strip())
+                sponsor = sponsor.strip()
                 if sponsor:
-                    bill.add_sponsorship(name=sponsor,
-                                         classification=spon_type,
-                                         entity_type='person',
-                                         primary=spon_type == 'primary')
-                    # spon_type = 'cosponsor'
+                    bill.add_sponsor(spon_type, sponsor,
+                                     official_type='introducer')
+                    spon_type = 'cosponsor'
+
 
         for link in page.xpath("//a[contains(@href, '/FN/')]"):
-            bill.add_document_link(link.text.strip(), link.attrib['href'])
+            bill.add_document(link.text.strip(), link.attrib['href'])
 
         for link in page.xpath("//a[contains(@href, '/BA/')]"):
-            bill.add_document_link(link.text.strip(), link.attrib['href'])
+            bill.add_document(link.text.strip(), link.attrib['href'])
 
         for link in page.xpath("//a[contains(@href, 'VOTE')]"):
             # 2011 HJ 31 has a blank vote, others might too
             if link.text:
-                yield from self.scrape_vote(bill, link.text.strip(),
-                                            link.attrib['href'])
+                self.scrape_vote(bill, link.text.strip(),
+                                 link.attrib['href'])
 
     def scrape_vote(self, bill, name, url):
         if "VOTE/H" in url:
@@ -168,20 +162,11 @@ class CTBillScraper(Scraper):
         date = page.xpath("string(//span[contains(., 'Taken on')])")
         date = re.match(r'.*Taken\s+on\s+(\d+/\s?\d+)', date).group(1)
         date = date.replace(' ', '')
-        date = datetime.datetime.strptime(date + " " + bill.legislative_session,
+        date = datetime.datetime.strptime(date + " " + bill['session'],
                                           "%m/%d %Y").date()
 
-        # not sure about classification.
-        vote = Vote(chamber=vote_chamber,
-                    start_date=date,
-                    motion_text=name,
-                    result='pass' if yes_count > need_count else 'fail',
-                    classification='passage',
-                    bill=bill
-                    )
-        vote.set_count('yes', yes_count)
-        vote.set_count('no', no_count)
-        vote.set_count('other', other_count)
+        vote = Vote(vote_chamber, date, name, yes_count > need_count,
+                    yes_count, no_count, other_count)
         vote.add_source(url)
 
         table = page.xpath("//table")[0]
@@ -200,9 +185,10 @@ class CTBillScraper(Scraper):
                                       (i + no_offset)):
                     vote.no(name)
                 else:
-                    vote.vote('other', name)
+                    vote.other(name)
 
-        yield vote
+        bill.add_vote(vote)
+
 
     def scrape_bill_history(self):
         history_url = "ftp://ftp.cga.ct.gov/pub/data/bill_history.csv"
@@ -217,11 +203,11 @@ class CTBillScraper(Scraper):
             if bill_id in self.bills:
                 action_rows[bill_id].append(row)
 
-        for (bill_id, actions) in action_rows.items():
-            bill = self.bills[bill_id][0]
+        for (bill_id, actions) in action_rows.iteritems():
+            bill = self.bills[bill_id]
 
             actions.sort(key=itemgetter('act_date'))
-            act_chamber = self.bills[bill_id][1]
+            act_chamber = bill['chamber']
 
             for row in actions:
                 date = row['act_date']
@@ -237,9 +223,9 @@ class CTBillScraper(Scraper):
                     comm_name = self._committee_names.get(comm_code,
                                                           comm_code)
                     action = "%s %s" % (action, comm_name)
-                    act_type.append('referral-committee')
+                    act_type.append('committee:referred')
                 elif row['qual1']:
-                    if bill.legislative_session in row['qual1']:
+                    if bill['session'] in row['qual1']:
                         action += ' (%s' % row['qual1']
                         if row['qual2']:
                             action += ' %s)' % row['qual2']
@@ -254,27 +240,26 @@ class CTBillScraper(Scraper):
                                   match.group(1)))
 
                 if (re.match(r'^ADOPTED, (HOUSE|SENATE)', action) or
-                        re.match(r'^(HOUSE|SENATE) PASSED', action)):
-                    act_type.append('passage')
+                    re.match(r'^(HOUSE|SENATE) PASSED', action)):
+                    act_type.append('bill:passed')
 
                 match = re.match(r'^Joint ((Un)?[Ff]avorable)', action)
                 if match:
-                    act_type.append('committee-passage-%s' %
+                    act_type.append('committee:passed:%s' %
                                     match.group(1).lower())
 
                 if not act_type:
-                    act_type = None
+                    act_type = ['other']
+
+                bill.add_action(act_chamber, action, date,
+                                type=act_type)
 
                 if 'TRANS.TO HOUSE' in action or action == 'SENATE PASSED':
                     act_chamber = 'lower'
 
-                if ('TRANSMITTED TO SENATE' in action or action == 'HOUSE PASSED'):
+                if ('TRANSMITTED TO SENATE' in action or
+                    action == 'HOUSE PASSED'):
                     act_chamber = 'upper'
-
-                bill.add_action(description=action,
-                                date=date,
-                                chamber=act_chamber,
-                                classification=act_type)
 
     def scrape_versions(self, chamber, session):
         chamber_letter = {'upper': 's', 'lower': 'h'}[chamber]
@@ -287,21 +272,16 @@ class CTBillScraper(Scraper):
         for f in files:
             match = re.match(r'^\d{4,4}([A-Z]+-\d{5,5})-(R\d\d)',
                              f.filename)
-            if not match:
-                self.warning('bad version filename %s', f.filename)
-                continue
-            bill_id = match.group(1).replace('-', '')
+            if match:
+                bill_id = match.group(1).replace('-', '')
 
-            try:
-                print(self.bills[bill_id])
-                bill = self.bills[bill_id][0]
-            except IndexError:
-                continue
+                try:
+                    bill = self.bills[bill_id]
+                except KeyError:
+                    continue
 
-            url = versions_url + f.filename
-            bill.add_version_link(media_type='text/html',
-                                  url=url,
-                                  note=match.group(2))
+                url = versions_url + f.filename
+                bill.add_version(match.group(2), url, mimetype='text/html')
 
     def scrape_subjects(self):
         info_url = "ftp://ftp.cga.ct.gov/pub/data/subject.csv"

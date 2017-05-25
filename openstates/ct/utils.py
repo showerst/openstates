@@ -2,13 +2,17 @@ import re
 import datetime
 import collections
 import chardet
-import csv
-from io import StringIO
+import unicodecsv
+try:
+    import cStringIO as StringIO
+except ImportError:
+    import StringIO
 
 
 def open_csv(data):
     char_encoding = chardet.detect(data.content)['encoding']
-    return csv.DictReader(StringIO(data.content.decode(char_encoding)))
+    return unicodecsv.DictReader(StringIO.StringIO(data.content),
+                                 encoding=char_encoding)
 
 
 Listing = collections.namedtuple('Listing', 'mtime size filename')

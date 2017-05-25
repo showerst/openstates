@@ -1,25 +1,27 @@
 import datetime
 import json
 
-from pupa.scrape import Scraper, Event
+from billy.scrape.events import EventScraper, Event
 
 import pytz
+import lxml.html
 
 from .utils import open_csv
 
 
-class CTEventScraper(Scraper):
+class CTEventScraper(EventScraper):
+    jurisdiction = 'ct'
 
     _tz = pytz.timezone('US/Eastern')
 
     def __init__(self, *args, **kwargs):
         super(CTEventScraper, self).__init__(*args, **kwargs)
 
-    def scrape(self):
+    def scrape(self, session, chambers):
         for (code, name) in self.get_comm_codes():
-            yield from self.scrape_committee_events(code, name)
+            self.scrape_committee_events(session, code, name)
 
-    def scrape_committee_events(self, code, name):
+    def scrape_committee_events(self, session, code, name):
         events_url = \
                 'http://www.cga.ct.gov/basin/fullcalendar/commevents.php?' \
                 'comm_code={}'.format(code)
@@ -37,18 +39,17 @@ class CTEventScraper(Scraper):
                           format(info['title']))
                 continue
 
-            when = datetime.datetime.strptime(info['start'], DATETIME_FORMAT)
-            # end = datetime.datetime.strptime(info['end'], DATETIME_FORMAT)
-            where = "{0} {1}".format(info['building'].strip(), info['location'].strip())
-            # end_time=self._tz.localize(end),
-            event = Event(start_time=self._tz.localize(when),
-                          timezone=self._tz.zone,
-                          location_name=where,
-                          name=info['title'],
-                          description=info['title'],)
+            event = Event(
+                    session=session,
+                    when=datetime.datetime.strptime(info['start'], DATETIME_FORMAT),
+                    end=datetime.datetime.strptime(info['end'], DATETIME_FORMAT),
+                    type='committee:meeting',
+                    description=info['title'],
+                    location="{0} {1}".format(info['building'].strip(), info['location'].strip())
+                    )
             event.add_source(events_url)
 
-            yield event
+            self.save_event(event)
 
     def get_comm_codes(self):
         url = "ftp://ftp.cga.ct.gov/pub/data/committee.csv"

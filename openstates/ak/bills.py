@@ -76,13 +76,21 @@ class AKBillScraper(BillScraper):
             bill_abbrs = ('HB', 'HR', 'HCR', 'HJR')
         bill_types = {'B': 'bill', 'R': 'resolution', 'JR': 'joint resolution',
                       'CR': 'concurrent resolution'}
+        need_smaller_maximums = ('HCR','HJR','SCR','SJR')
 
         for abbr in bill_abbrs:
             bill_type = bill_types[abbr[1:]]
-            bill_list_url = ('http://www.legis.state.ak.us/basis/range_multi'
-                             '.asp?session=%s&bill1=%s1&bill2=%s9999' %
-                             (session, abbr, abbr)
-                            )
+            #HCR and SRC need different ending numbers or they error out.
+            if abbr in need_smaller_maximums:
+                bill_list_url = ('http://www.legis.state.ak.us/basis/range_multi'
+                                '.asp?session=%s&bill1=%s1&bill2=%s99' %
+                                (session, abbr, abbr)
+                                )
+            else:
+                bill_list_url = ('http://www.legis.state.ak.us/basis/range_multi'
+                                '.asp?session=%s&bill1=%s1&bill2=%s9999' %
+                                (session, abbr, abbr)
+                                )
             doc = lxml.html.fromstring(self.get(bill_list_url).text)
             doc.make_links_absolute(bill_list_url)
             for bill_link in doc.xpath('//table[@align="center"]//tr/td[1]//a'):

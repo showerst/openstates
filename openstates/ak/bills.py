@@ -3,10 +3,14 @@ import datetime
 
 import lxml.html
 
-from pupa.scrape import Scraper, Bill, VoteEvent
+from billy.scrape import NoDataForPeriod
+from billy.scrape.bills import BillScraper, Bill
+from billy.scrape.votes import Vote
 
 
-class AKBillScraper(Scraper):
+class AKBillScraper(BillScraper):
+    jurisdiction = 'ak'
+
     _fiscal_dept_mapping = {
         'ADM': 'Administration',
         'CED': 'Commerce, Community & Economic Development',
@@ -65,16 +69,7 @@ class AKBillScraper(Scraper):
     _comm_re = re.compile(r'^(%s)\s' % '|'.join(_comm_mapping.keys()))
     _current_comm = None
 
-    def scrape(self, chamber=None, session=None):
-        if session is None:
-            session = self.latest_session()
-            self.info('no session specified, using %s', session)
-
-        chambers = [chamber] if chamber is not None else ['upper', 'lower']
-        for chamber in chambers:
-            yield from self.scrape_chamber(chamber, session)
-
-    def scrape_chamber(self, chamber, session):
+    def scrape(self, chamber, session):
         if chamber == 'upper':
             bill_abbrs = ('SB', 'SR', 'SCR', 'SJR')
         elif chamber == 'lower':
@@ -84,17 +79,18 @@ class AKBillScraper(Scraper):
 
         for abbr in bill_abbrs:
             bill_type = bill_types[abbr[1:]]
-            bill_list_url = (
-                'http://www.legis.state.ak.us/basis/range_multi'
-                '.asp?session=%s&bill1=%s1&bill2=%s9999'
-            ) % (session, abbr, abbr)
+            bill_list_url = ('http://www.legis.state.ak.us/basis/range_multi'
+                             '.asp?session=%s&bill1=%s1&bill2=%s9999' %
+                             (session, abbr, abbr)
+                            )
             doc = lxml.html.fromstring(self.get(bill_list_url).text)
             doc.make_links_absolute(bill_list_url)
             for bill_link in doc.xpath('//table[@align="center"]//tr/td[1]//a'):
                 bill_url = bill_link.get('href')
                 bill_id = bill_link.text.replace(' ', '')
-                yield from self.scrape_bill(chamber, session, bill_id, bill_type,
-                                            bill_url)
+                self.scrape_bill(chamber, session, bill_id, bill_type,
+                                 bill_url)
+
 
     def scrape_bill(self, chamber, session, bill_id, bill_type, url):
         doc = lxml.html.fromstring(self.get(url).text)
@@ -107,13 +103,7 @@ class AKBillScraper(Scraper):
             self.warning("skipping bill %s, no information" % url)
             return
 
-        bill = Bill(
-            bill_id,
-            title=title,
-            chamber=chamber,
-            classification=bill_type,
-            legislative_session=session,
-        )
+        bill = Bill(session, chamber, bill_id, title, type=bill_type)
         bill.add_source(url)
 
         # Get sponsors
@@ -126,22 +116,12 @@ class AKBillScraper(Scraper):
             sponsor = sponsors[0].strip()
 
             if sponsor:
-                bill.add_sponsorship(
-                    sponsors[0],
-                    entity_type='person',
-                    classification='primary',
-                    primary=True,
-                )
+                bill.add_sponsor('primary', sponsors[0])
 
             for sponsor in sponsors[1:]:
                 sponsor = sponsor.strip()
                 if sponsor:
-                    bill.add_sponsorship(
-                        sponsor,
-                        entity_type='person',
-                        classification='cosponsor',
-                        primary=False,
-                    )
+                    bill.add_sponsor('cosponsor', sponsor)
         else:
             # Committee sponsorship
             spons_str = spons_str.strip()
@@ -153,12 +133,7 @@ class AKBillScraper(Scraper):
                              " Committee (by request of the governor)")
 
             if spons_str:
-                bill.add_sponsorship(
-                    spons_str,
-                    entity_type='person',
-                    classification='primary',
-                    primary=True,
-                )
+                bill.add_sponsor('primary', spons_str)
 
         # Get actions from second myth table
         self._current_comm = None
@@ -179,29 +154,28 @@ class AKBillScraper(Scraper):
             if re.match("\w+ Y(\d+)", action):
                 vote_href = journal.xpath('.//a/@href')
                 if vote_href:
-                    yield from self.parse_vote(bill, action, act_chamber, act_date,
-                                               vote_href[0])
+                    self.parse_vote(bill, action, act_chamber, act_date,
+                                    vote_href[0])
 
             action, atype = self.clean_action(action)
 
             match = re.match('^Prefile released (\d+/\d+/\d+)$', action)
             if match:
                 action = 'Prefile released'
-                act_date = datetime.datetime.strptime(match.group(1), '%m/%d/%y')
+                act_date = datetime.datetime.strptime(match.group(1),
+                                                '%m/%d/%y')
 
-            bill.add_action(
-                action, chamber=act_chamber, date=act_date.strftime('%Y-%m-%d'),
-                classification=atype)
+            bill.add_action(act_chamber, action, act_date, type=atype)
 
         # Get subjects
+        bill['subjects'] = []
         for subj in doc.xpath('//a[contains(@href, "subject")]/text()'):
-            bill.add_subject(subj.strip())
+            bill['subjects'].append(subj.strip())
 
         # Get versions
-        text_list_url = (
-            "http://www.legis.state.ak.us/"
-            "basis/get_fulltext.asp?session=%s&bill=%s"
-        ) % (session, bill_id)
+        text_list_url = "http://www.legis.state.ak.us/"\
+            "basis/get_fulltext.asp?session=%s&bill=%s" % (
+            session, bill_id)
         bill.add_source(text_list_url)
 
         text_doc = lxml.html.fromstring(self.get(text_list_url).text)
@@ -209,13 +183,12 @@ class AKBillScraper(Scraper):
         for link in text_doc.xpath('//a[contains(@href, "get_bill_text")]'):
             name = link.xpath('../preceding-sibling::td/text()')[0].strip()
             text_url = link.get('href')
-            bill.add_version_link(name, text_url, media_type="text/html")
+            bill.add_version(name, text_url, mimetype="text/html")
 
         # Get documents
-        doc_list_url = (
-            "http://www.legis.state.ak.us/"
-            "basis/get_documents.asp?session=%s&bill=%s"
-        ) % (session, bill_id)
+        doc_list_url = "http://www.legis.state.ak.us/"\
+                "basis/get_documents.asp?session=%s&bill=%s" % (
+                    session, bill_id )
         doc_list = lxml.html.fromstring(self.get(doc_list_url).text)
         doc_list.make_links_absolute(doc_list_url)
         bill.add_source(doc_list_url)
@@ -223,20 +196,21 @@ class AKBillScraper(Scraper):
             h_name = href.text_content()
             h_href = href.attrib['href']
             if h_name.strip():
-                bill.add_document_link(h_name, h_href)
+                bill.add_document(h_name, h_href)
 
-        yield bill
 
-    def parse_vote(self, bill, action, act_chamber, act_date, url):
-        re_vote_text = re.compile(r'The question (?:being|to be reconsidered):\s*"(.*?\?)"', re.S)
-        re_header = re.compile(r'\d{2}-\d{2}-\d{4}\s{10,}\w{,20} Journal\s{10,}\d{,6}\s{,4}')
+        self.save_bill(bill)
+
+    def parse_vote(self, bill, action, act_chamber, act_date, url,
+        re_vote_text = re.compile(r'The question (?:being|to be reconsidered):\s*"(.*?\?)"', re.S),
+        re_header=re.compile(r'\d{2}-\d{2}-\d{4}\s{10,}\w{,20} Journal\s{10,}\d{,6}\s{,4}')):
 
         html = self.get(url).text
         doc = lxml.html.fromstring(html)
-
+        
         if len(doc.xpath('//pre')) < 2:
             return
-
+        
         # Find all chunks of text representing voting reports.
         votes_text = doc.xpath('//pre')[1].text_content()
         votes_text = re_vote_text.split(votes_text)
@@ -257,17 +231,7 @@ class AKBillScraper(Scraper):
                 else:
                     other += vcount
 
-            vote = VoteEvent(
-                bill=bill,
-                start_date=act_date.strftime('%Y-%m-%d'),
-                chamber=act_chamber,
-                motion_text=motion,
-                result='pass' if yes > no else 'fail',
-                classification='passage',
-            )
-            vote.set_count('yes', yes)
-            vote.set_count('no', no)
-            vote.set_count('other', other)
+            vote = Vote(act_chamber, act_date, motion, yes > no, yes, no, other)
 
             # In lengthy documents, the "header" can be repeated in the middle
             # of content. This regex gets rid of it.
@@ -277,24 +241,23 @@ class AKBillScraper(Scraper):
             vote_type = None
             for vote_list in vote_lines:
                 if vote_list.startswith('Yeas: '):
-                    vote_list, vote_type = vote_list[6:], 'yes'
+                    vote_list, vote_type = vote_list[6:], vote.yes
                 elif vote_list.startswith('Nays: '):
-                    vote_list, vote_type = vote_list[6:], 'no'
+                    vote_list, vote_type = vote_list[6:], vote.no
                 elif vote_list.startswith('Excused: '):
-                    vote_list, vote_type = vote_list[9:], 'other'
+                    vote_list, vote_type = vote_list[9:], vote.other
                 elif vote_list.startswith('Absent: '):
-                    vote_list, vote_type = vote_list[9:], 'other'
+                    vote_list, vote_type = vote_list[9:], vote.other
                 elif vote_list.strip() == '':
                     vote_type = None
                 if vote_type:
                     for name in vote_list.split(','):
                         name = name.strip()
                         if name:
-                            vote.vote(vote_type, name)
+                            vote_type(name)
 
             vote.add_source(url)
-
-            yield vote
+            bill.add_vote(vote)
 
     def clean_action(self, action):
         # Clean up some acronyms
@@ -350,35 +313,35 @@ class AKBillScraper(Scraper):
 
         atype = []
         if 'READ THE FIRST TIME' in action:
-            atype.append('introduction')
-            atype.append('reading-1')
+            atype.append('bill:introduced')
+            atype.append('bill:reading:1')
             action = action.replace('READ THE FIRST TIME',
-                                    'Read the first time')
+                                'Read the first time')
         if 'READ THE SECOND TIME' in action:
-            atype.append('reading-2')
+            atype.append('bill:reading:2')
             action = action.replace('READ THE SECOND TIME',
-                                    'Read the second time')
+                                'Read the second time')
         if 'READ THE THIRD TIME' in action:
-            atype.append('reading-3')
+            atype.append('bill:reading:3')
             action = action.replace('READ THE THIRD TIME',
-                                    'Read the third time')
+                                'Read the third time')
         if 'TRANSMITTED TO GOVERNOR' in action:
-            atype.append('executive-receipt')
+            atype.append('governor:received')
             action = action.replace('TRANSMITTED TO GOVERNOR',
-                                    'Transmitted to Governor')
+                                'Transmitted to Governor')
         if 'SIGNED INTO LAW' in action:
-            atype.append('executive-signature')
+            atype.append('governor:signed')
             action = action.replace('SIGNED INTO LAW', 'Signed into law')
         if 'Do Pass' in action:
-            atype.append('committee-passage')
+            atype.append('committee:passed')
         if 'Do Not Pass' in action:
-            atype.append('committee-failure')
+            atype.append('committee:failed')
         if action.startswith('PASSED'):
-            atype.append('passage')
+            atype.append('bill:passed')
         if 'REFERRED TO' in action:
-            atype.append('referral-committee')
+            atype.append('committee:referred')
             action = action.replace('REFERRED TO', 'Referred to')
         if 'Prefile released' in action:
-            atype.append('filing')
+            atype.append('bill:filed')
 
         return action, atype

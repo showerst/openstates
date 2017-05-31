@@ -1,15 +1,15 @@
-from pupa.scrape import Scraper, Organization
+from billy.scrape.committees import CommitteeScraper, Committee
 import lxml.html
 
+class NDCommitteeScraper(CommitteeScraper):
+    jurisdiction = 'nd'
 
-class NDCommitteeScraper(Scraper):
-
-    def scrape_committee(self, term, href, name):
+    def scrape_committee(self, term, chambers, href, name):
         page = self.get(href).text
         page = lxml.html.fromstring(page)
         page.make_links_absolute(href)
-        members = page.xpath("//div[@class='view-content']"
-                             "//a[contains(@href, 'members')]")
+        members =page.xpath("//div[@class='view-content']"
+                            "//a[contains(@href, 'members')]")
 
         if '/joint/' in href:
             chamber = 'joint'
@@ -25,7 +25,8 @@ class NDCommitteeScraper(Scraper):
             self.warning('Failed to identify chamber for {}; skipping'.format(href))
             return
 
-        cttie = Organization(name, chamber=chamber, classification='committee')
+        cttie = Committee(chamber, name)
+
         for a in members:
             member = a.text
             role = a.xpath("ancestor::div/h2[@class='pane-title']/text()")[0].strip()
@@ -39,12 +40,16 @@ class NDCommitteeScraper(Scraper):
             cttie.add_member(member, role=role)
 
         cttie.add_source(href)
-        yield cttie
+        self.save_committee(cttie)
 
-    def scrape(self, chamber=None):
+    def scrape(self, term, chambers):
+        self.validate_term(term, latest_only=True)
+
         # figuring out starting year from metadata
-        start_year = self.jurisdiction.legislative_sessions[-1]['start_date'][:4]
-        term = self.jurisdiction.legislative_sessions[-1]['identifier']
+        for t in self.metadata['terms']:
+            if t['name'] == term:
+                start_year = t['start_year']
+                break
 
         root = "http://www.legis.nd.gov/assembly"
         main_url = "%s/%s-%s/committees" % (
@@ -59,4 +64,4 @@ class NDCommitteeScraper(Scraper):
 
         ctties = page.xpath("//div[@class='inside']")[0]
         for a in ctties.xpath(".//a[contains(@href, 'committees')]"):
-            yield from self.scrape_committee(term, a.attrib['href'], a.text)
+            self.scrape_committee(term, chambers, a.attrib['href'], a.text)

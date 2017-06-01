@@ -546,7 +546,8 @@ class MOBillScraper(BillScraper, LXMLMixin):
 
     def _scrape_upper_chamber(self, year):
         # We only have data back to 2005.
-        if int(year) < 2005:
+        test_year = year.replace("S1","")
+        if int(test_year) < 2005:
             raise NoDataForPeriod(year)
 
         self.info('Scraping bills from upper chamber.')
@@ -576,7 +577,8 @@ class MOBillScraper(BillScraper, LXMLMixin):
 
     def _scrape_lower_chamber(self, year):
         # We only have data back to 2000.
-        if int(year) < 2000:
+        test_year = year.replace("S1","")
+        if int(test_year) < 2000:
             raise NoDataForPeriod(year)
 
         self.info('Scraping bills from lower chamber.')
@@ -586,6 +588,7 @@ class MOBillScraper(BillScraper, LXMLMixin):
         self._parse_house_billpage(bill_page_url, year)
 
     def scrape(self, chamber, year):
+        #year blows up in int conversion further down the line if we don't do this.
         getattr(self, '_scrape_' + chamber + '_chamber')(year)
 
         if len(self._bad_urls) > 0:

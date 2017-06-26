@@ -40,7 +40,7 @@ metadata = {
             'name': '2017-2018',
             'start_year': 2017,
             'end_year': 2018,
-            'sessions': ['2017','2017A'],
+            'sessions': ['2017A','2017'],
         },
     ],
     'session_details': {
@@ -152,7 +152,7 @@ metadata = {
     },
     'feature_flags': ['events', 'influenceexplorer'],
     '_ignored_scraped_sessions': [
-        '2010O', '2010A', '2010', '2016O'
+        '2010O', '2010A', '2010', '2016O', '2018'
     ],
 }
 

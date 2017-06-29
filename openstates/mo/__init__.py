@@ -43,7 +43,7 @@ metadata = dict(
         },
         {
             'name': '2017-2018',
-            'sessions': ['2017','2017S1'],
+            'sessions': ['2017','2017S1','2017S2'],
             'start_year': 2017,
             'end_year': 2018,
         },        
@@ -101,6 +101,13 @@ metadata = dict(
             'display_name': '2017 Extraordinary Session',
             '_scraped_name': '2017 Extraordinary Session',
         },     
+        '2017S2': {
+            'type': 'special',
+            'start_date': datetime.date(2017,6,12),
+            'end_date': datetime.date(2017,6,13),
+            'display_name': '2017 2nd Extraordinary Session',
+            '_scraped_name': '2017 2nd Extraordinary Session',
+        },   
     },
     feature_flags = ['subjects', 'influenceexplorer'],
     _ignored_scraped_sessions = [

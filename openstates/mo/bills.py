@@ -242,8 +242,13 @@ class MOBillScraper(BillScraper, LXMLMixin):
     def _scrape_house_subjects(self, session):
         self.info('Collecting subject tags from lower house.')
 
-        subject_list_url = 'http://house.mo.gov/subjectindexlist.aspx?year={}'\
-            .format(session)
+        if "S" in session:
+            code = "S2"
+            subject_list_url = 'http://house.mo.gov/subjectindexlist.aspx?year={}&code={}'\
+            .format(session, code)
+        else:
+            subject_list_url = 'http://house.mo.gov/subjectindexlist.aspx?year={}'\
+                .format(session)
         subject_page = self.lxmlize(subject_list_url)
 
         # Create a list of all the possible bill subjects.
@@ -314,9 +319,9 @@ class MOBillScraper(BillScraper, LXMLMixin):
         # the session name
         header_tag = bill_list_page.xpath('//*[@id="ContentPlaceHolder1_lblAssemblyInfo"]')[0].text_content()
         if header_tag.find('1st Extraordinary Session') != -1:
-            session = year + ' 1st Extraordinary Session'
+            session = '2017S1'
         elif header_tag.find('2nd Extraordinary Session') != -1:
-            session = year + ' 2nd Extraordinary Session'
+            session = '2017S2'
         else:
             session = year
 
@@ -547,16 +552,23 @@ class MOBillScraper(BillScraper, LXMLMixin):
     def _scrape_upper_chamber(self, year):
         # We only have data back to 2005.
         test_year = year.replace("S1","")
+        test_year = year.replace("S2","")
         if int(test_year) < 2005:
             raise NoDataForPeriod(year)
 
         self.info('Scraping bills from upper chamber.')
 
-        year2 = "%02d" % (int(year) % 100)
+        year2 = "%02d" % (int(test_year) % 100)
 
         # Save the root URL, since we'll use it later.
         bill_root = 'http://www.senate.mo.gov/{}info/BTS_Web/'.format(year2)
+
         index_url = bill_root + 'BillList.aspx?SessionType=R'
+
+        if('S2' in year):
+            index_url = bill_root + 'BillList.aspx?SessionType=S2'
+        if('S1' in year):
+            index_url = bill_root + 'BillList.aspx?SessionType=S1'
 
         index_page = self.get(index_url).text
         index_page = lxml.html.fromstring(index_page)
@@ -576,15 +588,23 @@ class MOBillScraper(BillScraper, LXMLMixin):
                 #print "one down!"
 
     def _scrape_lower_chamber(self, year):
+        if "S" in year:
+            code = "S2"
+
         # We only have data back to 2000.
         test_year = year.replace("S1","")
+        test_year = year.replace("S2","")
         if int(test_year) < 2000:
             raise NoDataForPeriod(year)
 
         self.info('Scraping bills from lower chamber.')
 
-        bill_page_url = '{}/BillList.aspx?year={}'.format(
-            self._senate_base_url,year)
+        if code:
+            bill_page_url = '{}/BillList.aspx?year={}&code={}'.format(
+                             self._senate_base_url, test_year,code)
+        else:
+            bill_page_url = '{}/BillList.aspx?year={}'.format(
+                             self._senate_base_url, test_year)
         self._parse_house_billpage(bill_page_url, year)
 
     def scrape(self, chamber, year):

@@ -45,7 +45,7 @@ metadata = {
             'name': '85',
             'start_year': 2017,
             'end_year': 2018,
-            'sessions': ['85'],
+            'sessions': ['85','851'],
         }
     ],
     'session_details': {
@@ -118,6 +118,12 @@ metadata = {
             'end_date': datetime.date(2017, 6, 1),
             'display_name': '85th Legislature (2017)',
             '_scraped_name': '85(R) - 2017',
+        },
+        '851': {
+            'type': 'special',
+            'start_date': datetime.date(2017, 7, 10),
+            'display_name': '85th Legislature, 1st Called Session (2017)',
+            '_scraped_name': '85(1) - 2017',
         },
     },
     'feature_flags': ['events', 'subjects', 'influenceexplorer'],

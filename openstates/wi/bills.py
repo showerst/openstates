@@ -39,6 +39,7 @@ action_classifiers = {
 
 class WIBillScraper(BillScraper):
     jurisdiction = 'wi'
+    subjects = defaultdict(list)
 
     def scrape_subjects(self, year, site_id):
         last_url = None
@@ -47,8 +48,6 @@ class WIBillScraper(BillScraper):
         # if you visit this page in your browser it is infinite-scrolled
         # but if you disable javascript you'll see the 'Down' links
         # that we use to scrape the data
-
-        self.subjects = defaultdict(list)
 
         while last_url != next_url:
             html = self.get(next_url).text
@@ -98,7 +97,8 @@ class WIBillScraper(BillScraper):
                                                                 'reg')
         chamber_slug = {'upper': 'sen', 'lower': 'asm'}[chamber]
 
-        self.scrape_subjects(year, site_id)
+        if not self.subjects:
+            self.scrape_subjects(year, site_id)
 
         types = ('bill', 'joint_resolution', 'resolution')
 

@@ -35,6 +35,12 @@ metadata = {
     ],
     'feature_flags': [ 'events', 'influenceexplorer' ],
     'session_details': {
+        'Special_100th': {'display_name': '100th Special Session (2017-2018)',
+                 '_scraped_name': '100   (2017-2018)',
+                 'speaker': 'Madigan',
+                 'president': 'Cullerton',
+                 'params': { 'GA': '100', 'SessionId': '91' },
+        },
         '100th': {'display_name': '100th Regular Session (2017-2018)',
                  '_scraped_name': '100   (2017-2018)',
                  'speaker': 'Madigan',

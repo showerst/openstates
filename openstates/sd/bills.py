@@ -1,44 +1,40 @@
 import re
 import datetime
 import lxml.html
-
-from pupa.scrape import Scraper, Bill, VoteEvent
-from pupa.scrape.base import ScrapeError
-
-from openstates.utils import LXMLMixin
+from billy.scrape import ScrapeError
+from billy.scrape.bills import BillScraper, Bill
+from billy.scrape.votes import Vote
 
 
-class SDBillScraper(Scraper, LXMLMixin):
+class SDBillScraper(BillScraper):
+    jurisdiction = 'sd'
 
-    def scrape(self, chambers=None, session=None):
+    def scrape(self, chamber, session):
         url = 'http://www.sdlegislature.gov/Legislative_Session' \
               '/Bills/default.aspx?Session={}'.format(session)
 
-        if not session:
-            session = self.latest_session()
-            self.info('no session specified, using %s', session)
+        if chamber == 'upper':
+            bill_abbr = 'S'
+        else:
+            bill_abbr = 'H'
 
-        chambers = [chambers] if chambers else ['upper', 'lower']
+        page = self.get(url).text
+        page = lxml.html.fromstring(page)
+        page.make_links_absolute(url)
 
-        for chamber in chambers:
-            if chamber == 'upper':
-                bill_abbr = 'S'
-            else:
-                bill_abbr = 'H'
+        for link in page.xpath("//a[contains(@href, 'Bill.aspx') and"
+                               " starts-with(., '%s')]" % bill_abbr):
+            bill_id = link.text.strip().replace(u'\xa0', ' ')
 
-            page = self.lxmlize(url)
+            title = link.xpath("string(../../td[2])").strip()
 
-            for link in page.xpath("//a[contains(@href, 'Bill.aspx') and"
-                                   " starts-with(., '%s')]" % bill_abbr):
-                bill_id = link.text.strip().replace(u'\xa0', ' ')
-
-                title = link.xpath("string(../../td[2])").strip()
-
-                yield from self.scrape_bill(chamber, session, bill_id, title,
-                                            link.attrib['href'])
+            self.scrape_bill(chamber, session, bill_id, title,
+                             link.attrib['href'])
 
     def scrape_bill(self, chamber, session, bill_id, title, url):
-        page = self.lxmlize(url)
+        page = self.get(url).text
+        page = lxml.html.fromstring(page)
+        page.make_links_absolute(url)
 
         if re.match(r'^(S|H)B ', bill_id):
             btype = ['bill']
@@ -51,12 +47,7 @@ class SDBillScraper(Scraper, LXMLMixin):
         else:
             btype = ['bill']
 
-        bill = Bill(bill_id,
-                    legislative_session=session,
-                    chamber=chamber,
-                    title=title,
-                    classification=btype
-                    )
+        bill = Bill(session, chamber, bill_id, title, type=btype)
         bill.add_source(url)
 
         regex_ns = "http://exslt.org/regular-expressions"
@@ -64,27 +55,22 @@ class SDBillScraper(Scraper, LXMLMixin):
             "//a[re:test(@href, 'Bill.aspx\?File=.*\.htm', 'i')]",
             namespaces={'re': regex_ns})
         for link in version_links:
-            bill.add_version_link(
-                                link.xpath('string()').strip(),
-                                link.attrib['href'],
-                                media_type='text/html',
-                                on_duplicate='ignore'
-                )
+            bill.add_version(link.xpath('string()').strip(),
+                             link.attrib['href'],
+                             mimetype='text/html',
+                             on_duplicate='ignore',
+                             )
 
         sponsor_links = page.xpath(
             "//td[contains(@id, 'tdSponsors')]/a")
         for link in sponsor_links:
-            bill.add_sponsorship(
-                    link.text,
-                    classification='primary',
-                    primary=True,
-                    entity_type='person'
-                )
+            bill.add_sponsor("primary", link.text)
 
         actor = chamber
         use_row = False
         self.debug(bill_id)
-        for row in page.xpath("//table[contains(@id, 'BillActions')]/tr"):
+        for row in page.xpath(
+            "//table[contains(@id, 'BillActions')]/tr"):
 
             if 'Date' in row.text_content() and 'Action' in row.text_content():
                 use_row = True
@@ -96,10 +82,10 @@ class SDBillScraper(Scraper, LXMLMixin):
 
             atypes = []
             if action.startswith('First read'):
-                atypes.append('introduction')
-                atypes.append('reading-1')
+                atypes.append('bill:introduced')
+                atypes.append('bill:reading:1')
             elif action.startswith('Signed by Governor'):
-                atypes.append('executive-signature')
+                atypes.append('governor:signed')
                 actor = 'executive'
 
             match = re.match(r'(.*) Do Pass( Amended)?, (Passed|Failed)',
@@ -107,29 +93,25 @@ class SDBillScraper(Scraper, LXMLMixin):
             if match:
                 if match.group(1) in ['Senate',
                                       'House of Representatives']:
-                    first = ''
+                    first = 'bill'
                 else:
-                    first = 'committee-'
-                if match.group(3).lower() == 'passed':
-                    second = 'passage'
-                elif match.group(3).lower() == 'failed':
-                    second = 'failure'
-                atypes.append("%s%s" % (first, second))
+                    first = 'committee'
+                atypes.append("%s:%s" % (first, match.group(3).lower()))
 
             if 'referred to' in action.lower():
-                atypes.append('referral-committee')
+                atypes.append('committee:referred')
 
             if 'Motion to amend, Passed Amendment' in action:
-                atypes.append('amendment-introduction')
-                atypes.append('amendment-passage')
+                atypes.append('amendment:introduced')
+                atypes.append('amendment:passed')
 
             if 'Veto override, Passed' in action:
-                atypes.append('veto-override-passage')
+                atypes.append('bill:veto_override:passed')
             elif 'Veto override, Failed' in action:
-                atypes.append('veto-override-failure')
+                atypes.append('bill:veto_override:failed')
 
             if 'Delivered to the Governor' in action:
-                atypes.append('executive-receipt')
+                atypes.append('governor:received')
 
             match = re.match("First read in (Senate|House)", action)
             if match:
@@ -146,14 +128,16 @@ class SDBillScraper(Scraper, LXMLMixin):
             date = datetime.datetime.strptime(date, "%m/%d/%Y").date()
 
             for link in row.xpath("td[2]/a[contains(@href, 'RollCall')]"):
-                yield from self.scrape_vote(bill, date, link.attrib['href'])
+                self.scrape_vote(bill, date, link.attrib['href'])
 
-            bill.add_action(action, date, chamber=actor, classification=atypes)
+            bill.add_action(actor, action, date, type=atypes)
 
+        subjects = []
         for link in page.xpath("//a[contains(@href, 'Keyword')]"):
-            bill.add_subject(link.text.strip())
+            subjects.append(link.text.strip())
+        bill['subjects'] = subjects
 
-        yield bill
+        self.save_bill(bill)
 
     def scrape_vote(self, bill, date, url):
         page = self.get(url).text
@@ -175,55 +159,51 @@ class SDBillScraper(Scraper, LXMLMixin):
         else:
             raise ScrapeError("Bad chamber: %s" % location)
 
-        # committee = ' '.join(location.split(' ')[1:]).strip()
-        # if not committee or committee.startswith('of Representatives'):
-        #     committee = None
+        committee = ' '.join(location.split(' ')[1:]).strip()
+        if not committee or committee.startswith('of Representatives'):
+            committee = None
 
         motion = ', '.join(header.split(', ')[2:]).strip()
-        if motion:
+        if not motion:
             # If we can't detect a motion, skip this vote
-            yes_count = int(
-                page.xpath("string(//td[contains(@id, 'tdAyes')])"))
-            no_count = int(
-                page.xpath("string(//td[contains(@id, 'tdNays')])"))
-            excused_count = int(
-                page.xpath("string(//td[contains(@id, 'tdExcused')])"))
-            absent_count = int(
-                page.xpath("string(//td[contains(@id, 'tdAbsent')])"))
+            return
 
-            passed = yes_count > no_count
+        yes_count = int(
+            page.xpath("string(//td[contains(@id, 'tdAyes')])"))
+        no_count = int(
+            page.xpath("string(//td[contains(@id, 'tdNays')])"))
+        excused_count = int(
+            page.xpath("string(//td[contains(@id, 'tdExcused')])"))
+        absent_count = int(
+            page.xpath("string(//td[contains(@id, 'tdAbsent')])"))
+        other_count = excused_count + absent_count
 
-            if motion.startswith('Do Pass'):
-                type = 'passage'
-            elif motion == 'Concurred in amendments':
-                type = 'amendment'
-            elif motion == 'Veto override':
-                type = 'veto_override'
-            else:
-                type = 'other'
+        passed = yes_count > no_count
 
-            vote = VoteEvent(chamber=chamber,
-                             start_date=date,
-                             motion_text=motion,
-                             result='pass' if passed else 'fail',
-                             classification=type,
-                             bill=bill
-                             )
+        if motion.startswith('Do Pass'):
+            type = 'passage'
+        elif motion == 'Concurred in amendments':
+            type = 'amendment'
+        elif motion == 'Veto override':
+            type = 'veto_override'
+        else:
+            type = 'other'
 
-            vote.add_source(url)
-            vote.set_count('yes', yes_count)
-            vote.set_count('no', no_count)
-            vote.set_count('excused', excused_count)
-            vote.set_count('absent', absent_count)
+        vote = Vote(chamber, date, motion, passed, yes_count, no_count,
+                    other_count)
+        vote['type'] = type
 
-            for td in page.xpath("//table[contains(@id, 'tblVotes')]/tr/td"):
-                if td.text in ('Aye', 'Yea'):
-                    vote.yes(td.getprevious().text.strip())
-                elif td.text == 'Nay':
-                    vote.no(td.getprevious().text.strip())
-                elif td.text == 'Excused':
-                    vote.vote('excused', td.getprevious().text.strip())
-                elif td.text == 'Absent':
-                    vote.vote('absent', td.getprevious().text.strip())
+        if committee:
+            vote['committee'] = committee
 
-            yield vote
+        vote.add_source(url)
+
+        for td in page.xpath("//table[contains(@id, 'tblVotes')]/tr/td"):
+            if td.text in ('Aye', 'Yea'):
+                vote.yes(td.getprevious().text.strip())
+            elif td.text == 'Nay':
+                vote.no(td.getprevious().text.strip())
+            elif td.text in ('Excused', 'Absent'):
+                vote.other(td.getprevious().text.strip())
+
+        bill.add_vote(vote)

@@ -9,14 +9,14 @@ from billy.scrape.votes import Vote
 import xlrd
 import scrapelib
 import lxml.html
-
+import json
 
 class OHBillScraper(BillScraper):
     jurisdiction = 'oh'
 
     def scrape(self, session, chambers):
         # Bills endpoint can sometimes take a very long time to load
-        self.timeout = 300
+        self.timeout = 600
 
         if int(session) < 128:
             raise AssertionError("No data for period {}".format(session))
@@ -256,11 +256,16 @@ class OHBillScraper(BillScraper):
                     self.save_bill(bill)
 
     def pages(self,base_url, first_page):
-        page = self.get(first_page)
-        page = page.json()
+        if first_page == 'http://search-prod.lis.state.oh.us/solarapi/v1/general_assembly_132/bills':
+            json_data=open('/opt/sunlightfoundation.com/openstates/openstates/oh/bills.json').read()
+            page = json.loads(json_data)
+        else:
+            page = self.get(first_page, timeout=600)
+            page = page.json()
+        
         yield page
         while "nextLink" in page:
-            page = self.get(base_url+page["nextLink"])
+            page = self.get(base_url+page["nextLink"], timeout=600)
             page = page.json()
             yield page
 

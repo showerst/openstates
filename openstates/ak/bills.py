@@ -83,7 +83,7 @@ class AKBillScraper(BillScraper):
             #HCR and SRC need different ending numbers or they error out.
             if abbr in need_smaller_maximums:
                 bill_list_url = ('http://www.legis.state.ak.us/basis/range_multi'
-                                '.asp?session=%s&bill1=%s1&bill2=%s99' %
+                                '.asp?session=%s&bill1=%s1&bill2=%s999' %
                                 (session, abbr, abbr)
                                 )
             else:

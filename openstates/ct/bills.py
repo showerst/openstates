@@ -19,6 +19,7 @@ class SkipBill(Exception):
 class CTBillScraper(BillScraper):
     jurisdiction = 'ct'
     latest_only = True
+    run_once = False
 
     def scrape(self, session, chambers):
         self.bills = {}
@@ -31,8 +32,8 @@ class CTBillScraper(BillScraper):
         self.scrape_introducers('upper')
         self.scrape_introducers('lower')
         self.scrape_bill_info(session, chambers)
-        for chamber in chambers:
-            self.scrape_versions(chamber, session)
+        #for chamber in chambers:
+        #    self.scrape_versions(chamber, session)
         self.scrape_bill_history()
 
         for bill in self.bills.itervalues():
@@ -112,6 +113,22 @@ class CTBillScraper(BillScraper):
 
         for link in page.xpath("//a[contains(@href, '/BA/')]"):
             bill.add_document(link.text.strip(), link.attrib['href'])
+
+        for link in page.xpath("//a[contains(@href, '/ACT/') and contains(@href, '.htm')]"):
+            bill.add_version(link.text.strip(), link.attrib['href'], mimetype='text/html')
+
+        for link in page.xpath("//a[contains(@href, '/FC/') and contains(@href, '.htm')]"):
+            bill.add_version(link.text.strip(), link.attrib['href'], mimetype='text/html')
+
+        for link in page.xpath("//a[contains(@href, '/TOB/') and contains(@href, '.htm')]"):
+            bill.add_version(link.text.strip(), link.attrib['href'], mimetype='text/html')
+
+        for link in page.xpath("//a[contains(@href, '/amd/') and contains(@href, '.htm')]"):
+            bill.add_version(link.text.strip(), link.attrib['href'], mimetype='text/html')
+
+        for link in page.xpath("//a[contains(@href, '/lcoamd/') and contains(@href, '.htm')]"):
+            amend_name = "{} (Uncalled)".format(link.text.strip())
+            bill.add_version(amend_name, link.attrib['href'], mimetype='text/html')
 
         for link in page.xpath("//a[contains(@href, 'VOTE')]"):
             # 2011 HJ 31 has a blank vote, others might too
@@ -266,6 +283,8 @@ class CTBillScraper(BillScraper):
         versions_url = "ftp://ftp.cga.ct.gov/%s/tob/%s/" % (
             session, chamber_letter)
 
+        # some of these run once per chamber, some once total
+
         page = self.get(versions_url).text
         files = parse_directory_listing(page)
 
@@ -281,7 +300,79 @@ class CTBillScraper(BillScraper):
                     continue
 
                 url = versions_url + f.filename
-                bill.add_version(match.group(2), url, mimetype='text/html')
+                bill.add_version(match.group(2), url, mimetype='text/html', on_duplicate='ignore')
+
+        if not self.run_once:
+            # ftp://ftp.cga.ct.gov/2017/act/pa/
+            acts_url = "ftp://ftp.cga.ct.gov/%s/act/pa/" % (
+                session)
+
+            page = self.get(acts_url).text
+            files = parse_directory_listing(page)
+
+            for f in files:
+                match = re.match(r'^\d{2}(\d{2})PA-(\d{5})-R\d{2}(\w{2}-\d{5})-PA',
+                                f.filename)
+                if match:
+                    bill_id = match.group(3).replace('-', '')
+
+                    try:
+                        bill = self.bills[bill_id]
+                    except KeyError:
+                        continue
+
+                    url = acts_url + f.filename
+                    pa_name = 'Public Act {}-{}'.format(match.group(1), match.group(2).lstrip('0'))
+                    bill.add_version(pa_name, url, mimetype='text/html', on_duplicate='ignore')
+
+                    # ftp://ftp.cga.ct.gov/2017/act/pa/
+
+
+        amend_url = "ftp://ftp.cga.ct.gov/%s/amd/%s/" % (
+            session, chamber_letter)
+
+        page = self.get(amend_url).text
+        files = parse_directory_listing(page)
+
+        for f in files:
+            match = re.match(r'^\d{4,4}([A-Z]+-\d{5,5})-(R\d\d)',
+                             f.filename)
+            if match:
+                bill_id = match.group(1).replace('-', '')
+
+                try:
+                    bill = self.bills[bill_id]
+                except KeyError:
+                    continue
+
+                url = amend_url + f.filename
+                amend_name = 'Amendment {}'.format(match.group(2))
+                bill.add_version(amend_name, url, mimetype='text/html', on_duplicate='ignore')
+
+        fc_url = "ftp://ftp.cga.ct.gov/%s/fc/" % (
+            session)
+
+        page = self.get(fc_url).text
+        files = parse_directory_listing(page)
+
+        if not self.run_once:
+
+            for f in files:
+                match = re.match(r'^\d{4,4}([A-Z]+-\d{5,5})-(R\d+)',
+                                f.filename)
+                if match:
+                    bill_id = match.group(1).replace('-', '')
+
+                    try:
+                        bill = self.bills[bill_id]
+                    except KeyError:
+                        continue
+
+                    url = fc_url + f.filename
+                    fc_name = 'File No. {}'.format(match.group(2).lstrip('R0'))
+                    bill.add_version(fc_name, url, mimetype='text/html', on_duplicate='ignore')
+
+        self.run_once = True
 
     def scrape_subjects(self):
         info_url = "ftp://ftp.cga.ct.gov/pub/data/subject.csv"

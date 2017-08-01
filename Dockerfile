@@ -31,7 +31,7 @@ RUN apt-get update && apt-get install -y \
     mysql-server \
     libmysqlclient-dev \
     mongodb-org-tools \
-    mdbtools
+    mdbtools \
 
 RUN mkdir -p /opt/openstates/
 RUN mkdir -p /var/run/mysqld/
@@ -43,7 +43,7 @@ RUN /opt/openstates/venv-billy/bin/pip install -U python-dateutil requests
 
 RUN virtualenv -p $(which python3) /opt/openstates/venv-pupa/
 RUN /opt/openstates/venv-pupa/bin/pip install -e git+https://github.com/opencivicdata/python-opencivicdata.git#egg=python-opencivicdata
-RUN /opt/openstates/venv-pupa/bin/pip install -e git+https://github.com/opencivicdata/pupa.git#egg=pupa
+RUN /opt/openstates/venv-pupa/bin/pip install -e git+https://github.com/showerst/pupa.git@kafka-producer#egg=pupa
 
 ENV PYTHONIOENCODING 'utf-8'
 ENV LANG 'en_US.UTF-8'

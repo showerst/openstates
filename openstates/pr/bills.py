@@ -72,16 +72,22 @@ class PRBillScraper(BillScraper):
         year = session[0:4]
         self.base_url = 'http://www.oslpr.org/legislatura/tl%s/tl_medida_print2.asp' % year
         chamber_letter = {'lower':'C','upper':'S'}[chamber]
+
+        #Sometimes PR skips a bill number
+        errCt = 0
         for code, type in self.bill_types.iteritems():
             counter = itertools.count(1)
             for n in counter:
+                if errCt > 2:
+                    break
                 bill_id = '%s%s%s' % (code, chamber_letter, str(n).zfill(4))
                 try:
                     self.scrape_bill(chamber, session, bill_id, type)
                 except NoSuchBill:
                     if n == 1:
                         self.warning("Found no bills of type '{}'".format(type))
-                    break
+                    errCt = errCt + 1
+
 
     def parse_action(self,chamber,bill,action,action_url,date):
         #if action.startswith('Referido'):
@@ -111,7 +117,7 @@ class PRBillScraper(BillScraper):
                 elif action_url.endswith('.pdf'):
                     mimetype = 'application/pdf'
                 elif action_url.endswith(('docx', 'dotx')):
-                    mimetype = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                    mimetype = 'application/msword'
                 elif action_url.endswith('docm'):
                     self.warning("Erroneous filename found: {}".format(action_url))
                     erroneous_filename = True

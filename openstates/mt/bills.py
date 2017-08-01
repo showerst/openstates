@@ -270,7 +270,7 @@ class MTBillScraper(Scraper, LXMLMixin):
             action_type = actions.categorize(action_name)
 
             if 'by senate' in action_name.lower():
-                actor = 'upper`'
+                actor = 'upper'
             bill.add_action(action_name, action_date,
                             classification=action_type,
                             chamber=actor)

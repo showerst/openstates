@@ -55,7 +55,7 @@ metadata = {
          'sessions': ['2015 Regular Session'],
          'start_year': 2015, 'end_year': 2016},
          {'name': '2017-2018',
-         'sessions': ['2017 Regular Session','January 2017 Special Session'],
+         'sessions': ['2017 Regular Session','August 2017 Special Session','January 2017 Special Session'],
          'start_year': 2016, 'end_year': 2018},
     ],
     'session_details': {
@@ -135,6 +135,13 @@ metadata = {
             'display_name': 'January 2017 Special Session',
             '_scraped_name': 'January 2017 Special Session',
             'site_id': 'jr7'
+        },
+        'August 2017 Special Session': {
+            'start_date': datetime.date(2017, 8, 1),
+            'type': 'special',
+            'display_name': 'August 2017 Special Session',
+            '_scraped_name': 'August 2017 Special Session',
+            'site_id': 'au7'            
         }
     },
     'feature_flags': ['subjects',

@@ -31,7 +31,7 @@ RUN apt-get update && apt-get install -y \
     mysql-server \
     libmysqlclient-dev \
     mongodb-org-tools \
-    mdbtools \
+    mdbtools
 
 RUN mkdir -p /opt/openstates/
 RUN mkdir -p /var/run/mysqld/

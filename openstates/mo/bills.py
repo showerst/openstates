@@ -588,6 +588,7 @@ class MOBillScraper(BillScraper, LXMLMixin):
                 #print "one down!"
 
     def _scrape_lower_chamber(self, year):
+        code = False
         if "S" in year:
             code = "S2"
 

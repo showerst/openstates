@@ -24,7 +24,7 @@ metadata = {
             'name': '2015-2018',
             'start_year': 2015,
             'end_year': 2018,
-            'sessions': ['2015os','2015rs', '2015fs', '2015ss', '2016rs','2016fs','2017rs'],
+            'sessions': ['2015os','2015rs', '2015fs', '2015ss', '2016rs','2016fs','2017rs','2018rs'],
         }
     ],
     'session_details': {
@@ -100,6 +100,12 @@ metadata = {
             'internal_id': '1069',
             '_scraped_name': 'Regular Session 2017',
         },        
+        '2018rs': {
+            'type': 'primary',
+            'display_name': '2018 Regular Session',
+            'internal_id': '1070',
+            '_scraped_name': 'Regular Session 2018',
+        },     
     },
     'feature_flags': ['subjects', 'influenceexplorer'],
     '_ignored_scraped_sessions': [

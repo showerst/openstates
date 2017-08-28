@@ -2,7 +2,7 @@ import datetime as dt
 import lxml.html
 import re
 
-from .utils import get_short_codes
+#from .utils import get_short_codes
 from urlparse import urlparse
 
 from billy.scrape.bills import BillScraper, Bill
@@ -24,6 +24,7 @@ def create_bill_report_url( chamber, year, bill_type ):
 
 def categorize_action(action):
     classifiers = (
+        ('Pending Introduction', 'bill:filed'),
         ('Pass(ed)? First Reading', 'bill:reading:1'),
         ('Introduced and Pass(ed)? First Reading',
              ['bill:introduced', 'bill:reading:1']),
@@ -81,6 +82,8 @@ class HIBillScraper(BillScraper):
         ret = {}
         for tr in metainf_table:
             row = tr.xpath( "td" )
+            if len(row) < 2: 
+                continue
             key   = row[0].text_content().strip()
             value = row[1].text_content().strip()
             if key[-1:] == ":":
@@ -148,30 +151,37 @@ class HIBillScraper(BillScraper):
             raise Exception("Missing bill versions.")
 
         for version in versions:
-            tds = version.xpath("./*")
-            if 'No other versions' in tds[0].text_content():
-                return
+            # tds = version.xpath("./*")
+            # if 'No other versions' in tds[0].text_content():
+            #     return
 
-            http_href = tds[0].xpath("./a")
-            name = http_href[0].text_content().strip()
-            # category  = tds[1].text_content().strip()
-            pdf_href  = tds[1].xpath("./a")
+            # http_href = tds[0].xpath("./a")
+            # name = http_href[0].text_content().strip()
+            # # category  = tds[1].text_content().strip()
+            # pdf_href  = tds[1].xpath("./a")
 
-            http_link = http_href[0].attrib['href']
-            pdf_link  = pdf_href[0].attrib['href']
+            # http_link = http_href[0].attrib['href']
+            # pdf_link  = pdf_href[0].attrib['href']
+            pdf = version.xpath('//a[contains(@href,".pdf") and normalize-space(text())]')
+            name = pdf[0].text_content().strip()
+            pdf_link = pdf[0].attrib['href'].strip()
 
-            bill.add_version(name, http_link, mimetype="text/html")
+            #bill.add_version(name, http_link, mimetype="text/html")
             bill.add_version(name, pdf_link, mimetype="application/pdf")
 
     def scrape_bill(self, session, chamber, bill_type, url):
         bill_html = self.get(url).text
         bill_page = lxml.html.fromstring(bill_html)
-        if not bill_page.xpath(
-            "//a[contains(@id, 'LinkButtonMeasure')]"):
-            return
-        scraped_bill_id = bill_page.xpath(
-            "//a[contains(@id, 'LinkButtonMeasure')]")[0].text_content()
-        bill_id = scraped_bill_id.split(' ')[0]
+        # if not bill_page.xpath(
+        #     "//a[contains(@id, 'LinkButtonMeasure')]"):
+        #     return
+        # scraped_bill_id = bill_page.xpath(
+        #     "//a[contains(@id, 'LinkButtonMeasure')]")[0].text_content()
+        # bill_id = scraped_bill_id.split(' ')[0]
+
+        bill_id = bill_page.xpath('//span[@id="ctl00_ContentPlaceHolderCol1_ListView1_ctrl0_LabelMeasure"]')[0].text_content()
+        bill_id = bill_id.replace('_','')
+
         versions = bill_page.xpath( "//table[contains(@id, 'GridViewVersions')]" )[0]
 
         tables = bill_page.xpath("//table")
@@ -196,10 +206,14 @@ class HIBillScraper(BillScraper):
             b['companion'] = companion
 
         for sponsor in meta['Introducer(s)']:
+            if sponsor == '':
+                sponsor = 'Governor'
             b.add_sponsor(type='primary', name=sponsor)
-
+        
         actions  = self.parse_bill_actions_table(b, action_table)
         versions = self.parse_bill_versions_table(b, versions)
+
+        print(b)
 
         self.save_bill(b)
 
@@ -238,7 +252,23 @@ class HIBillScraper(BillScraper):
 
 
     def scrape(self, session, chamber):
-        get_short_codes(self)
-        bill_types = ["bill", "cr", "r"]
-        for typ in bill_types:
-            self.scrape_type(session, chamber, typ)
+        # get_short_codes(self)
+        # bill_types = ["bill", "cr", "r"]
+        # for typ in bill_types:
+        #     self.scrape_type(session, chamber, typ)
+
+        # http://www.capitol.hawaii.gov/splsession.aspx?year=2017a
+        report_page_url = 'http://www.capitol.hawaii.gov/splsession.aspx?year=2017a'
+        list_html = self.get(report_page_url).text
+        list_page = lxml.html.fromstring(list_html)
+
+        if chamber == 'lower':
+            pass
+
+        for bill_url in list_page.xpath("//a[contains(@href, 'measure_indivSS')]"):
+            billy_billtype = 'bill'
+            if 'GM' in bill_url.attrib['href']:
+                billy_billtype = 'miscellaneous'
+            bill_url = HI_URL_BASE + bill_url.attrib['href']
+            self.scrape_bill(chamber, session, billy_billtype, bill_url)
+       

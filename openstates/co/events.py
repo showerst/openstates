@@ -1,90 +1,80 @@
 import datetime as dt
 import pytz
-
-from pupa.scrape import Scraper, Event
+import lxml.html
+from billy.scrape.events import EventScraper, Event
 from openstates.utils import LXMLMixin
 
-
-class COEventScraper(Scraper, LXMLMixin):
+class COEventScraper(EventScraper, LXMLMixin):
     _tz = pytz.timezone('America/Denver')
+    jurisdiction = 'co'
 
-    def scrape(self, chamber=None, session=None):
+    def scrape(self, chamber, session):
         url = 'http://leg.colorado.gov/content/committees'
-        if not session:
-            session = self.latest_session()
-            self.info('no session specified, using %s', session)
-        chambers = [chamber] if chamber else ['upper', 'lower']
-        for chamber in chambers:
-            if chamber == 'lower':
-                xpath = '//div/h3[text()="House Committees of Reference"]/../' \
-                        'following-sibling::div[contains(@class,"view-content")]/' \
-                        'table//td//span[contains(@class,"field-content")]/a/@href'
-            elif chamber == 'upper':
-                xpath = '//div/h3[text()="Senate Committees of Reference"]/../' \
-                        'following-sibling::div[contains(@class,"view-content")]/' \
-                        'table//td//span[contains(@class,"field-content")]/a/@href'
-            elif chamber == 'other':
-                # All the links under the headers that don't contain "House" or "Senate"
-                xpath = '//div/h3[not(contains(text(),"House")) and ' \
-                        'not(contains(text(),"Senate"))]/../' \
-                        'following-sibling::div[contains(@class,"view-content")]/' \
-                        'table//td//span[contains(@class,"field-content")]/a/@href'
 
-            page = self.lxmlize(url)
-            com_links = page.xpath(xpath)
+        if chamber == 'lower':
+            xpath = '//div/h3[text()="House Committees of Reference"]/../' \
+                    'following-sibling::div[contains(@class,"view-content")]/' \
+                    'table//td//span[contains(@class,"field-content")]/a/@href'
+        elif chamber == 'upper':
+            xpath = '//div/h3[text()="Senate Committees of Reference"]/../' \
+                    'following-sibling::div[contains(@class,"view-content")]/' \
+                    'table//td//span[contains(@class,"field-content")]/a/@href'
+        elif chamber == 'other':
+            # All the links under the headers that don't contain "House" or "Senate"
+            xpath = '//div/h3[not(contains(text(),"House")) and ' \
+                    'not(contains(text(),"Senate"))]/../' \
+                    'following-sibling::div[contains(@class,"view-content")]/' \
+                    'table//td//span[contains(@class,"field-content")]/a/@href'
 
-            for link in com_links:
+        page = self.lxmlize(url)
+        com_links = page.xpath(xpath)
+
+        for link in com_links:
+            page = self.lxmlize(link)
+
+            hearing_links = page.xpath('//div[contains(@class,"schedule-item-content")]/h4/a/@href')
+
+            for link in hearing_links:
                 page = self.lxmlize(link)
 
-                hearing_links = page.xpath('//div[contains(@class,"schedule-item-content")]'
-                                           '/h4/a/@href')
+                title = page.xpath('//header/h1[contains(@class,"node-title")]')[0]
+                title = title.text_content().strip()
 
-                for link in hearing_links:
-                    try:
-                        page = self.lxmlize(link)
+                date_day = page.xpath('//div[contains(@class,"calendar-date")]')[0]
+                date_day = date_day.text_content().strip()
 
-                        title = page.xpath('//header/h1[contains(@class,"node-title")]')[0]
-                        title = title.text_content().strip()
+                details = page.xpath('//span[contains(@class, "calendar-details")]')[0]
+                details = details.text_content().split('|')
 
-                        date_day = page.xpath('//div[contains(@class,"calendar-date")]')[0]
-                        date_day = date_day.text_content().strip()
+                date_time = details[0].strip()
+                location = details[1].strip()
 
-                        details = page.xpath('//span[contains(@class, "calendar-details")]')[0]
-                        details = details.text_content().split('|')
+                if 'Upon Adjournment' in date_time:
+                    date = dt.datetime.strptime(date_day, '%A %B %d, %Y')
+                else:
+                    date_str = '{} {}'.format(date_day, date_time)
+                    date = dt.datetime.strptime(date_str, '%A %B %d, %Y %I:%M %p')
 
-                        date_time = details[0].strip()
-                        location = details[1].strip()
+                agendas = []
+                # they overload the bills table w/ other agenda items. colspon=2 is agenda
+                non_bills = page.xpath('//td[@data-label="Hearing Item" and @colspan="2"]')
+                for row in non_bills:
+                    content = row.text_content().strip()
+                    agendas.append(content)
 
-                        if 'Upon Adjournment' in date_time:
-                            date = dt.datetime.strptime(date_day, '%A %B %d, %Y')
-                        else:
-                            date_str = '{} {}'.format(date_day, date_time)
-                            date = dt.datetime.strptime(date_str, '%A %B %d, %Y %I:%M %p')
+                agenda = "\n".join(agendas) if agendas else ''
 
-                        agendas = []
-                        # they overload the bills table w/ other agenda items. colspon=2 is agenda
-                        non_bills = page.xpath('//td[@data-label="Hearing Item" and @colspan="2"]')
-                        for row in non_bills:
-                            content = row.text_content().strip()
-                            agendas.append(content)
+                event = Event(session, date, "committee:meeting", title, location, agenda=agenda)
+                event.add_source(link)
 
-                        agenda = "\n".join(agendas) if agendas else ''
+                bills = page.xpath('//td[@data-label="Hearing Item"]/a')
+                for bill in bills:
+                    bill_id = bill.text_content().strip()
 
-                        event = Event(name=title,
-                                      start_time=self._tz.localize(date),
-                                      timezone=self._tz.zone,
-                                      location_name=location
-                                      )
-                        if agenda:
-                            event.add_agenda_item(agenda)
-                        event.add_source(link)
-                        bills = page.xpath('//td[@data-label="Hearing Item"]/a')
-                        for bill in bills:
-                            bill_id = bill.text_content().strip()
+                    event.add_related_bill(
+                        bill_id,
+                        description="hearing item",
+                        type="consideration"
+                    )
 
-                            item = event.add_agenda_item("hearing item")
-                            item.add_bill(bill_id)
-
-                        yield event
-                    except:
-                        pass
+                self.save_event(event)

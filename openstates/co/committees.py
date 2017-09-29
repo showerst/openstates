@@ -1,22 +1,20 @@
 from openstates.utils import LXMLMixin
-from pupa.scrape import Scraper, Organization
+from billy.scrape.committees import CommitteeScraper, Committee
 
 COMMITTEE_URL = ("http://leg.colorado.gov/content/committees")
 
 
-class COCommitteeScraper(Scraper, LXMLMixin):
+class COCommitteeScraper(CommitteeScraper, LXMLMixin):
+    jurisdiction = "co"
 
-    def scrape_page(self, link, chamber=None):
+    def scrape_page(self, link, chamber, term):
         page = self.lxmlize(link.attrib['href'])
         comName = link.text
         roles = {
             "Chair": "chair",
-            "Vice Chair": "vice-chair",
-            "Vice-Chair": "vice-chair",
+            "Vice Chair": "vice-chair"
         }
-        committee = Organization(comName,
-                                 chamber=chamber,
-                                 classification='committee')
+        committee = Committee(chamber, comName)
         committee.add_source(link.attrib['href'])
 
         for member in page.xpath('//div[@class="members"]/' +
@@ -32,10 +30,11 @@ class COCommitteeScraper(Scraper, LXMLMixin):
                 role = roles[role[0].text]
             else:
                 role = 'member'
-            committee.add_member(person, role=role)
-        yield committee
+            committee.add_member(person, role)
+        self.save_committee(committee)
+        return
 
-    def scrape(self, chambers=None):
+    def scrape(self, term, chambers):
         page = self.lxmlize(COMMITTEE_URL)
         # Actual class names have jquery uuids in them, so use
         # contains as a workaround
@@ -54,4 +53,4 @@ class COCommitteeScraper(Scraper, LXMLMixin):
                 link = comm.xpath('.//a')
                 # ignore empty cells
                 if link:
-                    yield from self.scrape_page(link[0], chamber)
+                    self.scrape_page(link[0], chamber, term)

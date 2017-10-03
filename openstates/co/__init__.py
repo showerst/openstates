@@ -27,7 +27,7 @@ metadata = dict(
          'sessions': ['2015A', '2016A'],
          'start_year': 2015, 'end_year': 2016},
         {'name': '2017-2018',
-         'sessions': ['2017A'],
+         'sessions': ['2017A','2017S1'],
          'start_year': 2017, 'end_year': 2018},
         ],
     session_details={
@@ -73,6 +73,12 @@ metadata = dict(
              'display_name': '2017 Regular Session',
             '_scraped_name': "2017 Regular Session",
             '_data_id':'10171'
+         },
+        '2017S1': {
+            'type'         : 'special',
+             'display_name': '2017 Extraordinary Session',
+            '_scraped_name': "2017 Extraordinary Session",
+            '_data_id':'27016'
          },
     },
     feature_flags=['influenceexplorer'],

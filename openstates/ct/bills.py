@@ -115,20 +115,20 @@ class CTBillScraper(BillScraper):
             bill.add_document(link.text.strip(), link.attrib['href'])
 
         for link in page.xpath("//a[contains(@href, '/ACT/') and contains(@href, '.htm')]"):
-            bill.add_version(link.text.strip(), link.attrib['href'], mimetype='text/html')
+            bill.add_version(link.text.strip(), link.attrib['href'], mimetype='text/html', on_duplicate='ignore')
 
         for link in page.xpath("//a[contains(@href, '/FC/') and contains(@href, '.htm')]"):
-            bill.add_version(link.text.strip(), link.attrib['href'], mimetype='text/html')
+            bill.add_version(link.text.strip(), link.attrib['href'], mimetype='text/html', on_duplicate='ignore')
 
         for link in page.xpath("//a[contains(@href, '/TOB/') and contains(@href, '.htm')]"):
-            bill.add_version(link.text.strip(), link.attrib['href'], mimetype='text/html')
+            bill.add_version(link.text.strip(), link.attrib['href'], mimetype='text/html', on_duplicate='ignore')
 
         for link in page.xpath("//a[contains(@href, '/amd/') and contains(@href, '.htm')]"):
-            bill.add_version(link.text.strip(), link.attrib['href'], mimetype='text/html')
+            bill.add_version(link.text.strip(), link.attrib['href'], mimetype='text/html', on_duplicate='ignore')
 
         for link in page.xpath("//a[contains(@href, '/lcoamd/') and contains(@href, '.htm')]"):
             amend_name = "{} (Uncalled)".format(link.text.strip())
-            bill.add_version(amend_name, link.attrib['href'], mimetype='text/html')
+            bill.add_version(amend_name, link.attrib['href'], mimetype='text/html', on_duplicate='ignore')
 
         for link in page.xpath("//a[contains(@href, 'VOTE')]"):
             # 2011 HJ 31 has a blank vote, others might too

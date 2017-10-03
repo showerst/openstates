@@ -112,13 +112,13 @@ class HIBillScraper(BillScraper):
 
             real_committees = []
 
-            if committees:
-                for committee in committees:
-                    try:
-                        committee = self.short_ids[committee]['name']
-                        real_committees.append(committee)
-                    except KeyError:
-                        pass
+            # if committees:
+            #     for committee in committees:
+            #         try:
+            #             # committee = self.short_ids[committee]['name']
+            #             # real_committees.append(committee)
+            #         except KeyError:
+            #             pass
 
             bill.add_action(actor, string, date,
                             type=act_type, committees=real_committees)

@@ -1,42 +1,40 @@
 import re
-import pytz
-import urllib
 import datetime
 import collections
 
+from billy.scrape.bills import BillScraper, Bill
+from billy.scrape.votes import Vote
+from .utils import (bill_abbr, parse_action_date, bill_list_url, history_url,
+                    info_url, vote_url)
+
 import lxml.html
-from pupa.scrape import Scraper, Bill, VoteEvent
+import urlparse
 
-from . import utils
-from . import actions
-
-
-tz = pytz.timezone('America/New_York')
+from .actions import Categorizer
 
 
-class PABillScraper(Scraper):
-    def scrape(self, chamber=None, session=None):
-        if session is None:
-            session = self.latest_session()
-            self.info('no session specified, using %s', session)
-        chambers = [chamber] if chamber is not None else ['upper', 'lower']
+class PABillScraper(BillScraper):
+    jurisdiction = 'pa'
+    categorizer = Categorizer()
+
+    def scrape(self, chamber, session):
+        self.validate_session(session)
 
         match = re.search("#(\d+)", session)
-        for chamber in chambers:
-            if match:
-                yield from self.scrape_session(chamber, session, int(match.group(1)))
-            else:
-                yield from self.scrape_session(chamber, session)
+        if match:
+            self.scrape_session(chamber, session, int(match.group(1)))
+        else:
+            self.scrape_session(chamber, session)
 
     def scrape_session(self, chamber, session, special=0):
-        url = utils.bill_list_url(chamber, session, special)
+        url = bill_list_url(chamber, session, special)
 
         page = self.get(url).text
         page = lxml.html.fromstring(page)
         page.make_links_absolute(url)
 
         for link in page.xpath('//a[contains(@href, "billinfo")]'):
-            yield from self.parse_bill(chamber, session, special, link)
+            self.parse_bill(chamber, session, special, link)
 
     def parse_bill(self, chamber, session, special, link):
         bill_num = link.text.strip()
@@ -47,50 +45,45 @@ class PABillScraper(Scraper):
         elif type_abbr == 'R':
             btype = ['resolution']
 
-        bill_id = "%s%s %s" % (utils.bill_abbr(chamber), type_abbr, bill_num)
+        bill_id = "%s%s %s" % (bill_abbr(chamber), type_abbr, bill_num)
 
-        url = utils.info_url(chamber, session, special, type_abbr, bill_num)
+        url = info_url(chamber, session, special, type_abbr, bill_num)
         page = self.get(url).text
         page = lxml.html.fromstring(page)
         page.make_links_absolute(url)
 
-        xpath = '/'.join([
-            '//div[contains(@class, "BillInfo-ShortTitle")]',
-            'div[@class="BillInfo-Section-Data"]',
-        ])
+        xpath = '//div[contains(@class, "BillInfo-ShortTitle")]/div[@class="BillInfo-Section-Data"]'
         title = page.xpath(xpath).pop().text_content().strip()
         if not title:
             return
-        bill = Bill(bill_id, legislative_session=session, title=title, chamber=chamber,
-                    classification=btype)
+        bill = Bill(session, chamber, bill_id, title, type=btype)
         bill.add_source(url)
 
         self.parse_bill_versions(bill, page)
 
-        self.parse_history(bill, chamber, utils.history_url(chamber, session, special,
-                           type_abbr, bill_num))
+
+        self.parse_history(bill, history_url(chamber, session, special,
+            type_abbr, bill_num))
 
         # only fetch votes if votes were seen in history
         # if vote_count:
-        yield from self.parse_votes(
-            bill,
-            utils.vote_url(chamber, session, special, type_abbr, bill_num),
-        )
+        self.parse_votes(bill, vote_url(chamber, session, special,
+                                        type_abbr, bill_num))
 
         # Dedupe sources.
-        sources = bill.sources
+        sources = bill['sources']
         for source in sources:
             if 1 < sources.count(source):
                 sources.remove(source)
 
-        yield bill
+        self.save_bill(bill)
 
     def parse_bill_versions(self, bill, page):
         mimetypes = {
             'icon-IE': 'text/html',
             'icon-file-pdf': 'application/pdf',
             'icon-file-word': 'application/msword',
-        }
+            }
         for a in page.xpath('//*[contains(@class, "BillInfo-PNTable")]//td/a'):
             try:
                 span = a[0]
@@ -102,7 +95,7 @@ class PABillScraper(Scraper):
                     break
 
             href = a.attrib['href']
-            params = urllib.parse.parse_qs(href[href.find("?") + 1:])
+            params = urlparse.parse_qs(href[href.find("?") + 1:])
 
             for key in ('pn', 'PrintersNumber'):
                 try:
@@ -111,10 +104,10 @@ class PABillScraper(Scraper):
                 except KeyError:
                     continue
 
-            bill.add_version_link("Printer's No. %s" % printers_number,
-                                  href, media_type=mimetype, on_duplicate='ignore')
+            bill.add_version("Printer's No. %s" % printers_number,
+                             href, mimetype=mimetype, on_duplicate='use_old')
 
-    def parse_history(self, bill, chamber, url):
+    def parse_history(self, bill, url):
         bill.add_source(url)
         html = self.get(url).text
         tries = 0
@@ -126,7 +119,7 @@ class PABillScraper(Scraper):
         doc = lxml.html.fromstring(html)
         doc.make_links_absolute(url)
         self.parse_sponsors(bill, doc)
-        self.parse_actions(bill, chamber, doc)
+        self.parse_actions(bill, doc)
         # vote count
         return len(doc.xpath('//a[contains(@href, "rc_view_action1")]/text()'))
 
@@ -148,16 +141,15 @@ class PABillScraper(Scraper):
 
             if sponsor.find(' and ') != -1:
                 dual_sponsors = sponsor.split(' and ')
-                bill.add_sponsorship(dual_sponsors[0].strip().title(), classification=sponsor_type,
-                                     primary=sponsor_type == 'primary', entity_type='person')
-                bill.add_sponsorship(dual_sponsors[1].strip().title(), classification='cosponsor',
-                                     primary=sponsor_type == 'primary', entity_type='person')
+                bill.add_sponsor(sponsor_type, dual_sponsors[0].strip().title())
+                bill.add_sponsor('cosponsor', dual_sponsors[1].strip().title())
             else:
                 name = sponsor.strip().title()
-                bill.add_sponsorship(name, classification=sponsor_type,
-                                     primary=sponsor_type == 'primary', entity_type='person')
+                bill.add_sponsor(sponsor_type, name)
 
-    def parse_actions(self, bill, chamber, page):
+    def parse_actions(self, bill, page):
+        chamber = bill['chamber']
+
         for tr in page.xpath("//table[@class='DataTable']//tr"):
             action = tr.xpath("string()").replace(u'\xa0', ' ').strip()
 
@@ -177,9 +169,9 @@ class PABillScraper(Scraper):
                 continue
 
             action = match.group(1)
-            date = utils.parse_action_date(match.group(2))
-            types = list(actions.categorize(action))
-            bill.add_action(action, tz.localize(date), chamber=chamber, classification=types)
+            attrs = self.categorizer.categorize(action)
+            date = parse_action_date(match.group(2))
+            bill.add_action(chamber, action, date, **attrs)
 
     def parse_votes(self, bill, url):
         bill.add_source(url)
@@ -193,9 +185,9 @@ class PABillScraper(Scraper):
             page = lxml.html.fromstring(page)
             page.make_links_absolute(url)
             if '/RC/' in url:
-                yield from self.parse_chamber_votes(bill, url)
+                self.parse_chamber_votes(bill, url)
             elif '/RCC/' in url:
-                yield from self.parse_committee_votes(bill, url)
+                self.parse_committee_votes(bill, url)
             else:
                 msg = 'Unexpected vote url: %r' % url
                 raise Exception(msg)
@@ -210,9 +202,10 @@ class PABillScraper(Scraper):
         for link in page.xpath(xpath)[::-1]:
             date_str = link.xpath('string(../preceding-sibling::td)').strip()
             date = datetime.datetime.strptime(date_str, "%m/%d/%Y")
-            yield self.parse_roll_call(bill, link, chamber, date)
+            vote = self.parse_roll_call(link, chamber, date)
+            bill.add_vote(vote)
 
-    def parse_roll_call(self, bill, link, chamber, date):
+    def parse_roll_call(self, link, chamber, date):
         url = link.attrib['href']
         page = self.get(url).text
         page = lxml.html.fromstring(page)
@@ -238,18 +231,10 @@ class PABillScraper(Scraper):
         nv = int(page.xpath("//div[text() = 'N/V']")[0].getnext().text)
         other = lve + nv
 
-        vote = VoteEvent(
-            chamber=chamber,
-            start_date=tz.localize(date),
-            motion_text=motion,
-            classification=type,
-            result='pass' if yeas > (nays + other) else 'fail',
-            bill=bill,
-        )
-        vote.add_source(url)
-        vote.set_count('yes', yeas)
-        vote.set_count('no', nays)
-        vote.set_count('other', other)
+        passed = yeas > (nays + other)
+
+        vote = Vote(chamber, date, motion, passed, yeas, nays, other,
+                    type=type)
 
         for div in page.xpath('//*[contains(@class, "RollCalls-Vote")]'):
             name = div.text_content().strip()
@@ -267,7 +252,7 @@ class PABillScraper(Scraper):
             else:
                 msg = 'Unrecognized vote val: %s' % class_attr
                 raise Exception(msg)
-            vote.vote(voteval, name)
+            vote[voteval + '_votes'].append(name)
 
         return vote
 
@@ -276,7 +261,7 @@ class PABillScraper(Scraper):
         html = self.get(url).text
         doc = lxml.html.fromstring(html)
         doc.make_links_absolute(url)
-        chamber = ('upper' if 'Senate' in doc.xpath('string(//h1)') else 'lower')
+        chamber = ('upper'if 'Senate' in doc.xpath('string(//h1)') else 'lower')
         committee = tuple(doc.xpath('//h2')[0].itertext())[-2].strip()
         for link in doc.xpath("//a[contains(@href, 'listVoteSummary.cfm')]"):
 
@@ -290,34 +275,24 @@ class PABillScraper(Scraper):
                 break
 
             # Motion
+
             motion = link.text_content().split(' - ')[-1].strip()
             motion = 'Committee vote (%s): %s' % (committee, motion)
 
-            # Roll call
+            # Roll call.
             vote_url = link.attrib['href']
             rollcall = self.parse_upper_committee_vote_rollcall(bill, vote_url)
 
-            vote = VoteEvent(
-                chamber=chamber,
-                start_date=tz.localize(date),
-                motion_text=motion,
-                classification='other',
-                result='pass' if rollcall['passed'] else 'fail',
-                bill=bill,
-            )
-
-            vote.set_count('yes', rollcall['yes_count'])
-            vote.set_count('no', rollcall['no_count'])
-            vote.set_count('other', rollcall['other_count'])
+            vote = Vote(chamber, date, motion, type='other',
+                        committee=committee, **rollcall)
 
             for voteval in ('yes', 'no', 'other'):
                 for name in rollcall.get(voteval + '_votes', []):
-                    vote.vote(voteval, name)
+                    getattr(vote, voteval)(name)
 
             vote.add_source(url)
             vote.add_source(vote_url)
-
-            yield vote
+            bill.add_vote(vote)
 
     def parse_upper_committee_vote_rollcall(self, bill, url):
         bill.add_source(url)
@@ -353,3 +328,4 @@ class PABillScraper(Scraper):
         rollcall['passed'] = rollcall['yes_count'] > rollcall['no_count']
 
         return dict(rollcall)
+

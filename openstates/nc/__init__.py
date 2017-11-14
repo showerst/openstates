@@ -133,7 +133,7 @@ metadata = dict(
 def session_list():
     from billy.scrape.utils import url_xpath
     return url_xpath('http://www.ncleg.net',
-                     '//select[@name="sessionToSearch"]/option/text()')
+                     '//select[@name="sBiennium"]/option/text()')
 
 
 def extract_text(doc, data):

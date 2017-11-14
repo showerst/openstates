@@ -52,7 +52,7 @@ class NCBillScraper(BillScraper):
         letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
         for letter in letters:
-            url = 'http://www.ncga.state.nc.us/gascripts/Reports/keywords.pl?Letter=' + letter
+            url = 'http://www.ncleg.net/gascripts/Reports/keywords.pl?Letter=' + letter
             html = self.get(url).text
             doc = lxml.html.fromstring(html)
             for td in doc.xpath('//td[@class="tableText"]'):
@@ -79,7 +79,7 @@ class NCBillScraper(BillScraper):
         elif chamber == 'House':
             chamber = 'lower'
 
-        bill_detail_url = 'http://www.ncga.state.nc.us/gascripts/'\
+        bill_detail_url = 'http://www.ncleg.net/gascripts/'\
             'BillLookUp/BillLookUp.pl?Session=%s&BillID=%s' % (
             session, bill_id)
 
@@ -114,7 +114,7 @@ class NCBillScraper(BillScraper):
             version_name = vlink.text.replace(u'\xa0', ' ')
             # but neighboring span with anchor inside has the HTML version
             version_url = vlink.xpath('./following-sibling::span/a/@href')
-            version_url = 'http://www.ncga.state.nc.us' + version_url[0]
+            version_url = 'http://www.ncleg.net' + version_url[0]
             bill.add_version(version_name, version_url,
                              mimetype='text/html', on_duplicate='use_new')
 
@@ -166,7 +166,7 @@ class NCBillScraper(BillScraper):
 
     def scrape_chamber(self, chamber, session):
         chamber = {'lower': 'House', 'upper': 'Senate'}[chamber]
-        url = 'http://www.ncga.state.nc.us/gascripts/SimpleBillInquiry/'\
+        url = 'http://www.ncleg.net/gascripts/SimpleBillInquiry/'\
             'displaybills.pl?Session=%s&tab=Chamber&Chamber=%s' % (
             session, chamber)
 

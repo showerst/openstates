@@ -7,13 +7,13 @@ import re
 _categories = {
 
     # Bill is introduced or prefiled
-    "introduction": {
+    "bill:introduced": {
         'rgxs': ['^Introduced$'],
         'funcs': {},
         },
 
     # Bill has passed a chamber
-    "passage": {
+    "bill:passed": {
         'rgxs': [u'3rd Reading Passed',
                  u'^Resolution Adopted',
                  u'3rd Reading Concurred',
@@ -22,7 +22,7 @@ _categories = {
         },
 
     # Bill has failed to pass a chamber
-    "failure": {
+    "bill:failed": {
         'rgxs': [
             u'3rd Reading Failed',
             u'Died in Process'
@@ -31,14 +31,14 @@ _categories = {
         },
 
     # Bill has been withdrawn from consideration
-    "withdrawal": {
+    "bill:withdrawn": {
         'rgxs': [],
         'funcs': {},
         },
 
     # ???
     # The chamber attempted a veto override and succeeded
-    "veto-override-passage": {
+    "bill:veto_override:passed": {
         'rgxs': [
             u'Veto Overridden in House',
             ]
@@ -46,7 +46,7 @@ _categories = {
 
     # ???
     # The chamber attempted a veto override and failed
-    "veto-override-failure": {
+    "bill:veto_override:failed": {
         'rgxs': [
             u'Veto Override Motion Failed',
             u'Veto Override Failed',
@@ -55,13 +55,13 @@ _categories = {
 
     # ???
     # A bill has undergone its first reading
-    "reading-1": {
+    "bill:reading:1": {
         'rgxs': ['First Reading'],
         'funcs': {},
         },
 
     # A bill has undergone its second reading
-    "reading-2": {
+    "bill:reading:2": {
         'rgxs': [
             u'Taken from Committee; Placed on 2nd Reading',
             u'2nd Reading Passed',
@@ -85,7 +85,7 @@ _categories = {
         },
 
     # A bill has undergone its third (or final) reading
-    "reading-3": {
+    "bill:reading:3": {
         'rgxs': [
             u'3rd Reading Passed as Amended by Senate',
             u'3rd Reading Passed as Amended by House',
@@ -100,51 +100,51 @@ _categories = {
         },
 
     # A bill has been filed (for states where this is a separate event from
-    # introduction)
-    "filing": {
+    # bill:introduced)
+    "bill:filed": {
         'rgxs': [],
         'funcs': {},
         },
 
     # A bill has been replaced with a substituted wholesale (called hoghousing
     # in some states)
-    "substitution": {
+    "bill:substituted": {
         'rgxs': [],
         'funcs': {},
         },
 
     # The bill has been transmitted to the governor for consideration
-    "executive-receipt": {
+    "governor:received": {
         'rgxs': ['Transmitted to Governor'],
         'funcs': {},
         },
 
     # The bill has signed into law by the governor
-    "executive-signature": {
+    "governor:signed": {
         'rgxs': ['Signed by Governor'],
         'funcs': {},
         },
 
     # The bill has been vetoed by the governor
-    "executive-veto": {
+    "governor:vetoed": {
         'rgxs': ['Vetoed by Governor'],
         'funcs': {},
         },
 
     # The governor has issued a line-item (partial) veto
-    "executive-veto:line-item": {
+    "governor:vetoed:line-item": {
         'rgxs': [
             u"Returned with Governor's Line-item Veto",
             ],
         },
 
     # An amendment has been offered on the bill
-    "amendment-introduction": {
+    "amendment:introduced": {
         'rgxs': ['^(?i)amendment.{,200}introduced'],
         },
 
     # The bill has been amended
-    "amendment-passage": {
+    "amendment:passed": {
         'rgxs': [
             u"3rd Reading Governor's Proposed Amendments Adopted",
             u"2nd Reading Governor's Proposed Amendments Adopted",
@@ -154,7 +154,7 @@ _categories = {
         },
 
     # An offered amendment has failed
-    "amendment-failure": {
+    "amendment:failed": {
         'rgxs': [
             u'2nd Reading House Amendments Not Concur Motion Failed',
             u'2nd Reading Senate Amendments Concur Motion Failed',
@@ -168,7 +168,7 @@ _categories = {
         },
 
     # An offered amendment has been amended (seen in Texas)
-    "amendment-amendment": {
+    "amendment:amended": {
         'rgxs': [
             u"3rd Reading Governor's Proposed Amendments Adopted",
             u"2nd Reading Governor's Proposed Amendments Adopted",
@@ -179,45 +179,43 @@ _categories = {
 
     # ???
     # An offered amendment has been withdrawn
-    "amendment-withdrawal": {
+    "amendment:withdrawn": {
         'rgxs': [],
         },
 
     # An amendment has been 'laid on the table' (generally
     # preventing further consideration)
-    # TODO: restore this once py-ocd-django has this classification
-    "amendment-deferral": {
+    "amendment:tabled": {
         'rgxs': ['Tabled in Committee'],
         },
 
     # The bill has been referred to a committee
-    "referral-committee": {
+    "committee:referred": {
         'rgxs': ["Referred to Committee",
                  "Rereferred to Committee"],
         },
 
     # The bill has been passed out of a committee
-    "committee-passage": {
+    "committee:passed": {
         'rgxs': [r'Committee Executive Action--Bill Passed',
                  r'Committee Report--Bill Passed',
-                 r'Committee Executive Action--Resolution Adopted',
-                 ]
+                 r'Committee Executive Action--Resolution Adopted',]
         },
 
     # ??? Looks like this'd require parsing
     # The bill has been passed out of a committee with a favorable report
-    "committee-passage-favorable": {
+    "committee:passed:favorable": {
         'rgxs': [],
         },
 
     # ??? Looks like this'd require parsing
     # The bill has been passed out of a committee with an unfavorable report
-    "committee-passage-unfavorable": {
+    "committee:passed:unfavorable": {
         'rgxs': [],
         },
 
     # The bill has failed to make it out of committee
-    "committee-failure": {
+    "committee:failed": {
         'rgxs': [r'Committee Executive Action--Resolution Not Adopted',
                  r'Committee Executive Action--Bill Not Passed',
                  r'Died in Standing Committee'],
@@ -233,8 +231,7 @@ for category, data in _categories.items():
     for rgx in data['rgxs']:
         append((category, re.compile(rgx).search))
 
-ac = set(
-    [u'2nd Reading Concur Motion Failed',
+ac = set([u'2nd Reading Concur Motion Failed',
      u'2nd Reading Concur as Amended Motion Failed',
      u'2nd Reading Concurred',
      u'2nd Reading Concurred as Amended',
@@ -414,8 +411,9 @@ ac = set(
      u'Veto Override Vote Mail Poll in Progress',
      u'Vetoed by Governor'])
 
-
 def categorize(action, funcs=_funcs):
+    '''
+    '''
     action = action.strip('" ')
     res = set()
     for category, f in funcs:
@@ -423,6 +421,6 @@ def categorize(action, funcs=_funcs):
             res.add(category)
 
     if not res:
-        return None
+        return ('other',)
 
     return tuple(res)

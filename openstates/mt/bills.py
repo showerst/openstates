@@ -4,15 +4,16 @@ import itertools
 import copy
 import tempfile
 from datetime import datetime
-from urllib.parse import urljoin
+from urlparse import urljoin
 from collections import defaultdict
 
-from pupa.scrape import Scraper, Bill, VoteEvent
-from pupa.utils.generic import convert_pdf
+from billy.scrape.bills import BillScraper, Bill
+from billy.scrape.votes import Vote
+from billy.scrape.utils import convert_pdf
 from scrapelib import HTTPError
 
 import lxml.html
-from lxml.etree import XMLSyntaxError
+from lxml.etree import ElementTree, XMLSyntaxError
 
 from openstates.utils import LXMLMixin
 from . import actions
@@ -54,7 +55,9 @@ vote_ambiguous_indicators = [
     'Taken from']
 
 
-class MTBillScraper(Scraper, LXMLMixin):
+class MTBillScraper(BillScraper, LXMLMixin):
+    #must set state attribute as the state's abbreviated name
+    jurisdiction = 'mt'
 
     def __init__(self, *args, **kwargs):
         super(MTBillScraper, self).__init__(*args, **kwargs)
@@ -65,40 +68,41 @@ class MTBillScraper(Scraper, LXMLMixin):
             'Z_ACTION=Find&P_SBJ_DESCR=&P_SBJT_SBJ_CD=&P_LST_NM1=&'
             'P_ENTY_ID_SEQ=')
 
-    def scrape(self, chamber=None, session=None):
-        # set default parameters
-        if not session:
-            session = self.latest_session()
-        chambers = [chamber] if chamber else ['upper', 'lower']
+    def scrape(self, chamber, session):
+        for term in self.metadata['terms']:
+            if session in term['sessions']:
+                year = term['start_year']
+                break
 
-        self.versions_dict = self._versions_dict(session)
+        self.versions_dict = self._versions_dict(year, session)
 
-        base_bill_url = 'http://leg.mt.gov/bills/%s/BillHtml/' % session
-        index_page = lxml.html.fromstring(self.get(base_bill_url).text)
+        base_bill_url = 'http://leg.mt.gov/bills/%d/BillHtml/' % year
+
+        if 'list_url' in self.metadata['session_details'][session]:
+            base_bill_url = self.metadata['session_details'][session]['list_url']
+
+        index_page = ElementTree(lxml.html.fromstring(self.get(base_bill_url).text))
 
         bill_urls = []
-        for bill_anchor in index_page.xpath('//a'):
+        for bill_anchor in index_page.findall('//a'):
             # See 2009 HB 645
             if bill_anchor.text.find("govlineveto") == -1:
                 # House bills start with H, Senate bills start with S
-                if 'lower' in chambers and bill_anchor.text.startswith('H'):
+                if chamber == 'lower' and bill_anchor.text.startswith('H'):
                     bill_urls.append("%s%s" % (base_bill_url, bill_anchor.text))
-                elif 'upper' in chambers and bill_anchor.text.startswith('S'):
+                elif chamber == 'upper' and bill_anchor.text.startswith('S'):
                     bill_urls.append("%s%s" % (base_bill_url, bill_anchor.text))
 
         for bill_url in bill_urls:
-            bill, votes = self.parse_bill(bill_url, session)
+            bill = self.parse_bill(bill_url, session, chamber)
             if bill:
-                yield bill
-                yield from votes
+                self.save_bill(bill)
 
-    def parse_bill(self, bill_url, session):
-
-        chamber = 'lower' if '/h' in bill_url.lower() else 'upper'
+    def parse_bill(self, bill_url, session, chamber):
 
         # Temporarily skip the differently-formatted house budget bill.
         if 'billhtml/hb0002.htm' in bill_url.lower():
-            return None, None
+            return
 
         bill = None
         try:
@@ -106,12 +110,13 @@ class MTBillScraper(Scraper, LXMLMixin):
         except XMLSyntaxError as e:
             self.logger.warning("Got %r while parsing %r" % (e, bill_url))
             return
+        bill_page = ElementTree(doc)
 
-        for anchor in doc.xpath('//a'):
+        for anchor in bill_page.findall('//a'):
             if (anchor.text_content().startswith('status of') or
-                    anchor.text_content().startswith('Detailed Information (status)')):
+                anchor.text_content().startswith('Detailed Information (status)')):
                 status_url = anchor.attrib['href'].replace("\r", "").replace("\n", "")
-                bill, votes = self.parse_bill_status_page(status_url, bill_url, session, chamber)
+                bill = self.parse_bill_status_page(status_url, bill_url, session, chamber)
 
         if bill is None:
             # No bill was found.  Maybe something like HB0790 in the 2005 session?
@@ -122,11 +127,11 @@ class MTBillScraper(Scraper, LXMLMixin):
             laws_year = self.metadata['session_details'][session]['years'][0] % 100
 
             status_url = self.search_url_template % (laws_year, bill_type, bill_number)
-            bill, votes = self.parse_bill_status_page(status_url, bill_url, session, chamber)
+            bill = self.parse_bill_status_page(status_url, bill_url, session, chamber)
 
         # Get versions on the detail page.
-        versions = [a['description'] for a in bill.actions
-                    if 'Version Available' in a['description']]
+        versions = [a['action'] for a in bill['actions']]
+        versions = [a for a in versions if 'Version Available' in a]
         if not versions:
             version_name = 'Introduced'
         else:
@@ -139,13 +144,13 @@ class MTBillScraper(Scraper, LXMLMixin):
         self.add_other_versions(bill)
 
         # Add pdf.
-        url = set(doc.xpath('//a/@href[contains(., "BillPdf")]')).pop()
-        bill.add_version_link(version_name, url, media_type='application/pdf')
+        url = set(bill_page.xpath('//a/@href[contains(., "BillPdf")]')).pop()
+        bill.add_version(version_name, url, mimetype='application/pdf')
 
         # Add status url as a source.
         bill.add_source(status_url)
 
-        return bill, votes
+        return bill
 
     def _get_tabledata(self, status_page):
         '''Montana doesn't currently list co/multisponsors on any of the
@@ -174,9 +179,10 @@ class MTBillScraper(Scraper, LXMLMixin):
         status_page = lxml.html.fromstring(self.get(status_url).text)
         # see 2007 HB 2... weird.
         bill_re = r'.*?/([A-Z]+)0*(\d+)\.pdf'
-        bill_xpath = '//a[contains(@href, ".pdf") and contains(@href, "billpdf")]/@href'
+        bill_xpath = '//a[contains(@href, ".pdf") and ' + \
+                'contains(@href, "billpdf")]/@href'
         bill_id = re.search(bill_re, status_page.xpath(bill_xpath)[0],
-                            re.IGNORECASE).groups()
+                re.IGNORECASE).groups()
         bill_id = "{0} {1}".format(bill_id[0], int(bill_id[1]))
 
         try:
@@ -188,25 +194,25 @@ class MTBillScraper(Scraper, LXMLMixin):
         # Add bill type.
         _bill_id = bill_id.lower()
         if 'b' in _bill_id:
-            classification = 'bill'
+            type_ = 'bill'
+
         elif 'j' in _bill_id or 'jr' in _bill_id:
-            classification = 'joint resolution'
+            type_ = 'joint resolution'
+
         elif 'cr' in _bill_id:
-            classification = 'concurrent resolution'
+            type_ = 'concurrent resolution'
+
         elif 'r' in _bill_id:
-            classification = 'resolution'
+            type_ = 'resolution'
 
-        bill = Bill(bill_id, legislative_session=session, chamber=chamber,
-                    title=title, classification=classification)
-
+        bill = Bill(session, chamber, bill_id, title, type=type_)
         self.add_actions(bill, status_page)
-        votes = self.add_votes(bill, status_page, status_url)
+        self.add_votes(bill, status_page, status_url)
 
         tabledata = self._get_tabledata(status_page)
 
         # Add sponsor info.
-        bill.add_sponsorship(tabledata['primary sponsor:'][0], classification='primary',
-                             entity_type='person', primary=True)
+        bill.add_sponsor('primary', tabledata['primary sponsor:'][0])
 
         # A various plus fields MT provides.
         plus_fields = [
@@ -235,7 +241,7 @@ class MTBillScraper(Scraper, LXMLMixin):
             if len(val) == 1:
                 val = val[0]
 
-            bill.extras[key] = val
+            bill[key] = val
 
         # Add bill subjects.
         xp = '//th[contains(., "Revenue/Approp.")]/ancestor::table/tr'
@@ -247,40 +253,39 @@ class MTBillScraper(Scraper, LXMLMixin):
                 continue
             subjects.append(subj)
 
-        for s in subjects:
-            bill.add_subject(s)
+        bill['subjects'] = subjects
 
         self.add_fiscal_notes(status_page, bill)
 
-        return bill, list(votes)
+        return bill
 
     def add_actions(self, bill, status_page):
 
         for action in reversed(status_page.xpath('//div/form[3]/table[1]/tr')[1:]):
             try:
                 actor = actor_map[action.xpath("td[1]")[0].text_content().split(" ")[0]]
-                action_name = action.xpath("td[1]")[0].text_content().replace(actor, ""
-                                                                              )[4:].strip()
+                action_name = action.xpath("td[1]")[0].text_content().replace(actor, "")[4:].strip()
             except KeyError:
                 action_name = action.xpath("td[1]")[0].text_content().strip()
                 actor = 'clerk' if action_name == 'Chapter Number Assigned' else ''
 
             action_name = action_name.replace("&nbsp", "")
-            action_date = datetime.strptime(action.xpath("td[2]")[0].text, '%m/%d/%Y').date()
+            action_date = datetime.strptime(action.xpath("td[2]")[0].text, '%m/%d/%Y')
             action_type = actions.categorize(action_name)
 
             if 'by senate' in action_name.lower():
-                actor = 'upper'
-            bill.add_action(action_name, action_date,
-                            classification=action_type,
-                            chamber=actor)
+                actor = 'upper`'
+            bill.add_action(actor, action_name, action_date, action_type)
 
-    def _versions_dict(self, session):
+    def _versions_dict(self, year, session):
         '''Get a mapping of ('HB', '2') tuples to version urls.'''
 
         res = defaultdict(dict)
 
-        url = 'http://leg.mt.gov/bills/%s/BillPdf/' % session
+        url = 'http://leg.mt.gov/bills/%d/' % year
+
+        if 'list_url' in self.metadata['session_details'][session]:
+            url = self.metadata['session_details'][session]['list_url']
 
         html = self.get(url).text
         doc = lxml.html.fromstring(html)
@@ -301,7 +306,7 @@ class MTBillScraper(Scraper, LXMLMixin):
 
         count = itertools.count(1)
         xcount = itertools.chain([1], itertools.count(1))
-        type_, id_ = bill.identifier.split()
+        type_, id_ = bill['bill_id'].split()
         version_urls = copy.copy(self.versions_dict[(type_, id_)])
         mimetype = 'application/pdf'
         version_strings = [
@@ -309,35 +314,38 @@ class MTBillScraper(Scraper, LXMLMixin):
             'Printed - New Version Available',
             'Clerical Corrections Made - New Version Available']
 
-        if bill.identifier == 'HB 2':
+        if bill['bill_id'] == 'HB 2':
             # Need to special-case this one.
             return
 
-        for i, a in enumerate(bill.actions):
-            text = a['description']
+        for i, a in enumerate(bill['actions']):
+
+            text = a['action']
+            actions = bill['actions']
             if text in version_strings:
-                name = bill.actions[i - 1]['description']
+
+                name = actions[i - 1]['action']
 
                 if 'Clerical Corrections' in text:
                     name += ' (clerical corrections made)'
                 try:
-                    url = version_urls.pop(str(next(count)))
+                    url = version_urls.pop(str(count.next()))
                 except KeyError:
                     msg = "No url found for version: %r" % name
                     self.warning(msg)
                 else:
                     if 'Introduced Bill' in text:
                         name = 'Introduced'
-                    bill.add_version_link(name, url, media_type=mimetype)
+                    bill.add_version(name, url, mimetype)
                     continue
 
                 try:
-                    url = version_urls['x' + str(next(xcount))]
+                    url = version_urls['x' + str(xcount.next())]
                 except KeyError:
                     continue
 
                 name = actions[i - 1]['action']
-                bill.add_version_link(name, url, media_type=mimetype)
+                bill.add_version(name, url, mimetype)
 
     def add_votes(self, bill, status_page, status_url):
         '''For each row in the actions table that links to a vote,
@@ -358,22 +366,22 @@ class MTBillScraper(Scraper, LXMLMixin):
 
                     # Get the matching vote object.
                     text = tr.itertext()
-                    action = next(text).strip()
+                    action = text.next().strip()
                     chamber, action = action.split(' ', 1)
-                    date = datetime.strptime(next(text), '%m/%d/%Y').date()
+                    date = datetime.strptime(text.next(), '%m/%d/%Y')
                     vote_url = vote_url[0]
 
                     chamber = actor_map[chamber]
                     vote = dict(chamber=chamber, date=date,
                                 action=action,
-                                vote_url=vote_url)
+                                sources=[{'url': vote_url}])
 
                     # Update the vote object with voters..
-                    vote = self._parse_votes(vote_url, vote, bill)
+                    vote = self._parse_votes(vote_url, vote)
                     if vote:
-                        yield vote
+                        bill.add_vote(vote)
 
-    def _parse_votes(self, url, vote, bill):
+    def _parse_votes(self, url, vote):
         '''Given a vote url and a vote object, extract the voters and
         the vote counts from the vote page and update the vote object.
         '''
@@ -388,13 +396,14 @@ class MTBillScraper(Scraper, LXMLMixin):
                 return
 
             try:
-                v = PDFCommitteeVote(url, resp.content, bill)
+                v = PDFCommitteeVote(url, resp.content)
                 return v.asvote()
-            except PDFCommitteeVoteParseError:
+            except PDFCommitteeVoteParseError as e:
                 # Warn and skip.
                 self.warning("Could't parse committee vote at %r" % url)
                 return
 
+        keymap = {'Y': 'yes', 'N': 'no'}
         html = self.get(url).text
         doc = lxml.html.fromstring(html)
 
@@ -405,7 +414,8 @@ class MTBillScraper(Scraper, LXMLMixin):
             # Most likely was a bogus link lacking vote data.
             return
 
-        yes_count, no_count, excused_count, absent_count = map(int, vals)
+        y, n, e, a = map(int, vals)
+        vote.update(yes_count=y, no_count=n, other_count=e + a)
 
         # Get the motion.
         try:
@@ -419,57 +429,31 @@ class MTBillScraper(Scraper, LXMLMixin):
 
         vote['motion'] = motion
 
-        action = vote['action']
-        vote_url = vote['vote_url']
+        # Add placeholder for passed (see below)
+        vote['passed'] = False
 
-        vote = VoteEvent(
-            chamber=vote['chamber'],
-            start_date=vote['date'],
-            motion_text=vote['motion'],
-            result='fail',      # placeholder
-            classification='passage',
-            bill=bill,
-            bill_action=vote['action'],
-        )
-        vote.add_source(vote_url)
-        vote.set_count('yes', yes_count)
-        vote.set_count('no', no_count)
-        vote.set_count('excused', excused_count)
-        vote.set_count('absent', absent_count)
+        vote = Vote(**vote)
 
         for text in doc.xpath('//table')[2].xpath('tr/td/text()'):
             if not text.strip(u'\xa0'):
                 continue
             v, name = filter(None, text.split(u'\xa0'))
-            # Considering Name is brackets as short name
-            regex = re.compile(".*?\((.*?)\)")
-            short_name = re.findall(regex, name)
-            if len(short_name) > 0:
-                note = 'Short Name: ' + short_name[0]
-            else:
-                note = ''
-            # Name without brackets like 'Kary, Douglas'
-            name = re.sub("[\(\[].*?[\)\]]", "", name)
-            if v == 'Y':
-                vote.yes(name, note=note)
-            elif v == 'N':
-                vote.no(name, note=note)
-            elif v == 'E':
-                vote.vote('excused', name, note=note)
-            elif v == 'A':
-                vote.vote('absent', name, note=note)
+            getattr(vote, keymap.get(v, 'other'))(name)
 
-        # code to deterimine value of `passed`
+        action = vote['action']
+
+        # Existing code to deterimine value of `passed`
+        yes_votes = vote['yes_votes']
+        no_votes = vote['no_votes']
         passed = None
 
         # some actions take a super majority, so we aren't just
         # comparing the yeas and nays here.
         for i in vote_passage_indicators:
-            if i in action:
+            if action.count(i):
                 passed = True
-                break
         for i in vote_failure_indicators:
-            if i in action and passed:
+            if action.count(i) and passed == True:
                 # a quick explanation:  originally an exception was
                 # thrown if both passage and failure indicators were
                 # present because I thought that would be a bug in my
@@ -478,32 +462,29 @@ class MTBillScraper(Scraper, LXMLMixin):
                 # I won't automatically mark it as passed if the yays
                 # ounumber the nays because I don't know what requires
                 # a supermajority in MT.
-                if no_count >= yes_count:
+                if no_votes >= yes_votes:
                     passed = False
-                    break
                 else:
                     raise Exception("passage and failure indicator"
                                     "both present at: %s" % url)
-            if i in action and passed is None:
+            if action.count(i) and passed == None:
                 passed = False
-                break
         for i in vote_ambiguous_indicators:
-            if i in action:
-                passed = yes_count > no_count
-                break
+            if action.count(i):
+                passed = yes_votes > no_votes
         if passed is None:
             raise Exception("Unknown passage at: %s" % url)
 
-        vote.result = 'pass' if passed else 'fail'
+        vote['passed'] = passed
 
         return vote
 
     def add_fiscal_notes(self, doc, bill):
 
         for link in doc.xpath('//a[contains(text(), "Fiscal Note")]'):
-            bill.add_document_link(link.text_content().strip(),
-                                   link.attrib['href'],
-                                   media_type='application/pdf')
+            bill.add_document(name=link.text_content().strip(),
+                              url=link.attrib['href'],
+                              mimetype='application/pdf')
 
 
 class PDFCommitteeVoteParseError(Exception):
@@ -516,9 +497,9 @@ class PDFCommitteeVote404Error(PDFCommitteeVoteParseError):
 
 class PDFCommitteeVote(object):
 
-    def __init__(self, url, resp, bill):
+    def __init__(self, url, resp):
+
         self.url = url
-        self.bill = bill
 
         # Fetch the document and put it into tempfile.
         fd, filename = tempfile.mkstemp()
@@ -541,7 +522,7 @@ class PDFCommitteeVote(object):
             msg = 'PDF file was empty.'
             raise PDFCommitteeVoteParseError(msg)
 
-        self.text = '\n'.join([line.decode() for line in text.splitlines() if line])
+        self.text = '\n'.join(filter(None, text.splitlines()))
 
     def committee(self):
         """
@@ -572,7 +553,7 @@ class PDFCommitteeVote(object):
 
         text = iter(self.text.splitlines())
 
-        line = next(text).strip()
+        line = text.next().strip()
         while True:
 
             _line = line.lower()
@@ -586,13 +567,13 @@ class PDFCommitteeVote(object):
                 break
 
             try:
-                line = next(text).strip()
+                line = text.next().strip()
             except StopIteration:
                 msg = 'Couldn\'t parse the vote date.'
                 raise PDFCommitteeVoteParseError(msg)
 
         try:
-            return datetime.strptime(line, '%B %d, %Y').date()
+            return datetime.strptime(line, '%B %d, %Y')
         except ValueError:
             raise PDFCommitteeVoteParseError("Could't parse the vote date.")
 
@@ -601,11 +582,11 @@ class PDFCommitteeVote(object):
         text = iter(self.text.splitlines())
 
         while True:
-            line = next(text)
+            line = text.next()
             if 'VOTE TABULATION' in line:
                 break
 
-        line = next(text)
+        line = text.next()
         _, motion = line.split(' - ')
         motion = motion.strip()
         return motion
@@ -660,24 +641,18 @@ class PDFCommitteeVote(object):
     def passed(self):
         return self.no_count() < self.yes_count()
 
-    def asvote(self):
-        v = VoteEvent(
-            chamber=self.chamber(),
-            start_date=self.date(),
-            motion_text=self.motion(),
-            result='pass' if self.passed() else 'fail',
-            classification='passage',
-            bill=self.bill,
-        )
-        v.set_count('yes', self.yes_count())
-        v.set_count('no', self.no_count())
-        v.set_count('other', self.other_count())
+    def asdict(self):
+        res = {}
+        methods = ('yes_count', 'no_count', 'motion', 'chamber',
+                   'other_count', 'passed', 'date')
+        # TODO: re-add committee
+        for m in methods:
+            res[m] = getattr(self, m)()
+        return res
 
-        for voter in self.yes_votes():
-            v.yes(voter)
-        for voter in self.no_votes():
-            v.no(voter)
-        for voter in self.other_votes():
-            v.vote('other', voter)
+    def asvote(self):
+        v = Vote(**self.asdict())
+        for key in 'yes_votes no_votes other_votes'.split():
+            v[key] = getattr(self, key)()
         v.add_source(self.url)
         return v

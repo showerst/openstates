@@ -2,16 +2,20 @@ import re
 
 import xlrd
 import lxml.html
-from pupa.scrape import Scraper, Organization
+from billy.scrape.committees import CommitteeScraper, Committee
 
 
-class MECommitteeScraper(Scraper):
-    def scrape(self, chamber=None):
-        if chamber in ['upper', None]:
-            yield from self.scrape_senate_comm()
-        if chamber in ['lower', None]:
-            yield from self.scrape_reps_comm()
-            yield from self.scrape_joint_comm()
+class MECommitteeScraper(CommitteeScraper):
+    jurisdiction = 'me'
+
+    def scrape(self, chamber, term_name):
+        self.validate_term(term_name, latest_only=True)
+
+        if chamber == 'upper':
+            self.scrape_senate_comm()
+        elif chamber == 'lower':
+            self.scrape_reps_comm()
+            self.scrape_joint_comm()
 
     def scrape_reps_comm(self):
         # As of 1/27/15, the committee page has the wrong
@@ -27,7 +31,7 @@ class MECommitteeScraper(Scraper):
         for n in range(1, 12, 2):
             path = 'string(//body/center[%s]/h1/a)' % (n)
             comm_name = root.xpath(path)
-            committee = Organization(chamber='lower', name=comm_name, classification='committee')
+            committee = Committee('lower', comm_name)
             count = count + 1
 
             path2 = '/html/body/ul[%s]/li/a' % (count)
@@ -45,7 +49,7 @@ class MECommitteeScraper(Scraper):
                 committee.add_member(rep, role)
             committee.add_source(url)
 
-            yield committee
+            self.save_committee(committee)
 
     senate_committee_pattern = re.compile(r'^Senator (.*?) of .*?(, Chair)?$')
 
@@ -59,8 +63,7 @@ class MECommitteeScraper(Scraper):
 
         headings = doc.xpath('//p/strong')
         for heading in headings:
-            committee = Organization(
-                chamber='upper', name=heading.text.strip(':'), classification='committee')
+            committee = Committee('upper', heading.text.strip(':'))
             committee.add_source(url)
             par = heading.getparent().getnext()
             while True:
@@ -72,7 +75,7 @@ class MECommitteeScraper(Scraper):
                 committee.add_member(name, 'chair' if chair is not None else 'member')
                 par = par.getnext()
 
-            yield committee
+            self.save_committee(committee)
 
     def scrape_joint_comm(self):
         fileurl = 'http://www.maine.gov/legis/house/commlist.xls'
@@ -84,7 +87,7 @@ class MECommitteeScraper(Scraper):
         # Special default dict.
         class Committees(dict):
             def __missing__(self, key):
-                val = Organization(chamber='joint', name=key, classification='committee')
+                val = Committee('joint', key)
                 self[key] = val
                 return val
         committees = Committees()
@@ -111,4 +114,4 @@ class MECommitteeScraper(Scraper):
 
         for _, committee in committees.items():
             committee.add_source(fileurl)
-            yield committee
+            self.save_committee(committee)

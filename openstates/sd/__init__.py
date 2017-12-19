@@ -48,7 +48,7 @@ metadata = dict(
             'name': '2017-2018',
             'start_year': 2017,
             'end_year': 2018,
-            'sessions': ['2017','2017s']
+            'sessions': ['2017','2017s','2018']
         },
     ],
     session_details = {
@@ -97,6 +97,10 @@ metadata = dict(
             'display_name': '2017 Special Session',
             '_scraped_name': '2017 (92nd) Special Session',
         },
+        '2018': {
+            'display_name': '2018',
+            '_scraped_name': '2018',
+        },
     },
     feature_flags = ['subjects', 'influenceexplorer'],
     _ignored_scraped_sessions = [
@@ -106,11 +110,23 @@ metadata = dict(
 
 
 def session_list():
-    html = scrapelib.Scraper().get('http://www.sdlegislature.gov/'
-                                   'Legislative_Session/Menu.aspx').text
-    doc = lxml.html.fromstring(html)
-    sessions = doc.xpath('//div[@id="ctl00_ContentPlaceHolder1_BlueBoxLeft"]//ul/li'
-        '/a/div/text()')
+
+    # html = scrapelib.Scraper().get('http://www.sdlegislature.gov/'
+    #                                 'Legislative_Session/archive.aspx').text
+    # doc = lxml.html.fromstring(html)
+    # sessions = [x.strip() for x in doc.xpath('//table//td[@data-title="Year"]/text()')]
+
+    # # Archive page lacks the latest session
+    # current_session_url = doc.xpath(
+    #     '//*[@id="ctl00_divHeader_mnuMain"]/li[6]/ul/li[1]/a/@href')[0]
+    # current_session = current_session_url.replace(
+    #     '/Legislative_Session/Bills/Default.aspx?Session=', '')
+    # if current_session not in sessions:
+    #     sessions.append(current_session)
+
+    sessions = ['2018']
+
+    # print(metadata['session_details'])
     return sessions
 
 

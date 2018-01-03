@@ -41,7 +41,7 @@ metadata = {
             'name': '2016-2019',
             'start_year': 2016, 'end_year': 2019,
             'sessions': [
-                '2016', '20161E', '20162E', '2017','20171E'
+                '2016', '20161E', '20162E', '2017','20171E','2018'
             ],
         },
     ],
@@ -132,7 +132,7 @@ metadata = {
         '20162E': {
             'display_name': '2016 Second Extraordinary Session',
             '_scraped_name': '2016 Second Extraordinary Session'
-        }, 
+        },
         '2017': {
             'type': 'primary',
             'start_date': datetime.date(2017, 1, 3),
@@ -143,6 +143,13 @@ metadata = {
         '20171E': {
             'display_name': '2017 First Extraordinary Session',
             '_scraped_name': '2017 First Extraordinary Session'
+        },
+        '2018': {
+            'type': 'primary',
+            'start_date': datetime.date(2018, 1, 2),
+            'end_date': datetime.date(2016, 4, 1),
+            'display_name': '2018 Regular Session',
+            '_scraped_name': '2018 Regular Session',
         },
     },
     'feature_flags': ['subjects', 'influenceexplorer'],

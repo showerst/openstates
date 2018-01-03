@@ -1,4 +1,5 @@
 import re
+import time as tt
 import datetime as dt
 
 from billy.scrape.bills import Bill, BillScraper
@@ -237,8 +238,8 @@ class NHBillScraper(BillScraper):
     def scrape_votes(self, session):
         votes = {}
         last_line = []
-
-        lines = self.get('http://gencourt.state.nh.us/dynamicdatafiles/RollCallSummary.txt').content.splitlines()
+        # due to some error on the NH site, the rollcallsummary file MUST have the x= param
+        lines = self.get('http://gencourt.state.nh.us/dynamicdatafiles/RollCallSummary.txt?x={}'.format(tt.time())).content.splitlines()
 
         for line in lines:
 
@@ -302,7 +303,7 @@ class NHBillScraper(BillScraper):
                     self.warning("Skipping processing this vote:")
                     self.warning("Bad ID: %s" % ( body+v_num ) )
                     continue
-                    
+
                 #code = self.legislators[employee]['seat']
                 if vote == 'Yea':
                     votes[body+v_num].yes(leg)

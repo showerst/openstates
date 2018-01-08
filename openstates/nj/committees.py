@@ -1,41 +1,38 @@
-from pupa.scrape import Scraper, Organization
-
+from billy.scrape.committees import CommitteeScraper, Committee
 from .utils import MDBMixin
 
 
-class NJCommitteeScraper(Scraper, MDBMixin):
-    def scrape(self, session=None):
-        if not session:
-            session = self.jurisdiction.legislative_sessions[-1]['name']
-            self.info('no session specified, using %s', session)
+class NJCommitteeScraper(CommitteeScraper, MDBMixin):
+    jurisdiction = 'nj'
 
-        year_abr = session[0:4]
+    def scrape(self, term, chambers):
+        year_abr = term[0:4]
 
         self._init_mdb(year_abr)
         members_csv = self.access_to_csv('COMember')
         info_csv = self.access_to_csv('Committee')
 
-        org_dictionary = {}
+        comm_dictionary = {}
 
-        # Committee Info Database
+        #Committe Info Database
         for rec in info_csv:
             abrv = rec["Code"]
             comm_name = rec["Description"]
+            comm_type = rec["Type"]
+            aide = rec["Aide"]
+            contact_info = rec["Phone"]
 
             if abrv[0] == "A":
                 chamber = "lower"
             elif abrv[0] == "S":
                 chamber = "upper"
 
-            org = Organization(
-                name=comm_name,
-                chamber=chamber,
-                classification='committee',
-            )
-            org.add_source('http://www.njleg.state.nj.us/downloads.asp')
-            org_dictionary[abrv] = org
+            comm = Committee(chamber, comm_name, comm_type = comm_type,
+                             aide = aide, contact_info = contact_info)
+            comm.add_source('http://www.njleg.state.nj.us/downloads.asp')
+            comm_dictionary[abrv] = comm
 
-        # Committee Member Database
+        #Committee Member Database
         POSITIONS = {
             'C': 'chair',
             'V': 'vice-chair',
@@ -45,11 +42,11 @@ class NJCommitteeScraper(Scraper, MDBMixin):
             # assignment=P means they are active, assignment=R means removed
             if member_rec['Assignment_to_Committee'] == 'P':
                 abr = member_rec["Code"]
-                org = org_dictionary[abr]
+                comm_name = comm_dictionary[abr]
 
                 leg = member_rec["Member"]
                 role = POSITIONS[member_rec["Position_on_Committee"]]
-                org.add_member(leg, role=role)
+                comm_name.add_member(leg, role=role)
 
-        for org in org_dictionary.values():
-            yield org
+        for comm in comm_dictionary.itervalues():
+            self.save_committee(comm)

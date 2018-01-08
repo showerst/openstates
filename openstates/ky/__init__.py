@@ -124,9 +124,9 @@ metadata = {
         },
         '2018RS': {
             'type': 'primary',
-            'start_date': datetime.date(2018, 1, 3),            
-            'display_name': '2017 Regular Session',
-            '_scraped_name': '2017 Regular Session',
+            'start_date': datetime.date(2018, 1, 3),
+            'display_name': '2018 Regular Session',
+            '_scraped_name': '2018 Regular Session',
         },
     },
     'feature_flags': ['subjects', 'events', 'influenceexplorer'],

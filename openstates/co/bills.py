@@ -135,7 +135,10 @@ class COBillScraper(BillScraper, LXMLMixin):
 
         #skip the header row
         for version in versions:
-            version_date = version.xpath('td[1]/text()')[0].strip()
+            version_date = ''
+            if version.xpath('td[1]/text()'):
+                version_date = version.xpath('td[1]/text()')[0].strip()
+
             #version_date = dt.datetime.strptime(version_date, '%m/%d/%Y')
             version_type = version.xpath('td[2]/text()')[0]
             version_url = version.xpath('td[3]/span/a/@href')[0]
@@ -144,6 +147,8 @@ class COBillScraper(BillScraper, LXMLMixin):
             # They're sorted rev-cron so the first one is the right name/date for the PDF
             # They also have a number of broken dates
             if version_date == '12/31/1969':
+                version_name = version_type
+            elif version_date != '':
                 version_name = version_type
             else:
                 version_name = '{} ({})'.format(version_type, version_date)
@@ -157,7 +162,7 @@ class COBillScraper(BillScraper, LXMLMixin):
                 seen_versions.append(version_url)
 
     def scrape_actions(self, bill, page):
-        chamber_map = {'Senate':'upper', 'House': 'lower', 
+        chamber_map = {'Senate':'upper', 'House': 'lower',
                        'Governor':'executive', 'ConfComm': 'joint'}
 
         actions = page.xpath('//div[@id="bill-documents-tabs7"]//table//tbody//tr')

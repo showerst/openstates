@@ -162,7 +162,8 @@ class MDBillScraper(BillScraper):
         for elem in elems:
             href = elem.get('href')
             if (href and "votes" in href and href.endswith('htm') and
-                href not in seen_votes):
+                    href not in seen_votes):
+                print("{} found as vote".format(href))
                 seen_votes.add(href)
                 vote = self.parse_vote_page(href)
                 vote.add_source(href)
@@ -170,6 +171,8 @@ class MDBillScraper(BillScraper):
 
 
     def parse_vote_page(self, vote_url):
+        print("parsing vote page {}".format(href))
+
         vote_html = self.get(vote_url).text
         doc = lxml.html.fromstring(vote_html)
 
@@ -283,6 +286,12 @@ class MDBillScraper(BillScraper):
             yes_count = None
             no_count = None
 
+        vote_date = None
+        vote_date_text = re.findall(r'(\d+/\d+/\d+)', action_text)
+        if vote_date_text:
+            print(vote_date_text)
+            vote_date = datetime.datetime.strptime(vote_date_text[0], '%m/%d/%y')
+
         if 'Passed' in motion:
             motion = motion.split(' Passed')[0]
             passed = True
@@ -310,9 +319,9 @@ class MDBillScraper(BillScraper):
             motion = 'Veto Override'
         else:
             raise Exception('unknown motion: %s' % motion)
-        vote = Vote(chamber=chamber, date=None, motion=motion,
+        vote = Vote(chamber=chamber, date=vote_date, motion=motion,
                     yes_count=yes_count, no_count=no_count,
-                    other_count=None, passed=passed)
+                    other_count=0, passed=passed)
         vfunc = None
 
         nobrs = doc.xpath('//nobr/text()')

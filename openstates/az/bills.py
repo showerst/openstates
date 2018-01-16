@@ -36,7 +36,7 @@ class AZBillScraper(BillScraper):
         """
         session_id = self.get_session_id(session)
         bill_json_url = 'https://apps.azleg.gov/api/Bill/?billNumber={}&sessionId={}&legislativeBody={}'.format(bill_id, session_id, self.chamber_map[chamber])
-        response = self.get(bill_json_url)
+        response = self.get(bill_json_url, verify=False)
         page = json.loads(response.content)
 
         bill_title = page['ShortTitle']
@@ -68,7 +68,7 @@ class AZBillScraper(BillScraper):
         # Careful, this sends XML to a browser but JSON to machines
         # https://apps.azleg.gov/api/DocType/?billStatusId=68408
         versions_url = 'https://apps.azleg.gov/api/DocType/?billStatusId={}'.format(internal_id)
-        page = json.loads(self.get(versions_url).content)
+        page = json.loads(self.get(versions_url, verify=False).content)
         if page and 'Documents' in page[0]:
             for doc in page[0]['Documents']:
                 if doc['HtmlPath']:
@@ -90,7 +90,7 @@ class AZBillScraper(BillScraper):
         # Careful, this sends XML to a browser but JSON to machines
         # https://apps.azleg.gov/api/BillSponsor/?id=68398
         sponsors_url = 'https://apps.azleg.gov/api/BillSponsor/?id={}'.format(internal_id)
-        page = json.loads(self.get(sponsors_url).content)
+        page = json.loads(self.get(sponsors_url, verify=False).content)
         for sponsor in page:
             if 'Prime' in sponsor['SponsorType']:
                 sponsor_type = 'primary'
@@ -114,7 +114,7 @@ class AZBillScraper(BillScraper):
     def scrape_subjects(self, bill, internal_id):
         # https://apps.azleg.gov/api/Keyword/?billStatusId=68149
         subjects_url = 'https://apps.azleg.gov/api/Keyword/?billStatusId={}'.format(internal_id)
-        page = json.loads(self.get(subjects_url).content)
+        page = json.loads(self.get(subjects_url, verify=False).content)
         subjects = []
         for subject in page:
             subjects.append(subject['Name'])
@@ -206,7 +206,7 @@ class AZBillScraper(BillScraper):
             raise NoDataForPeriod(session)
 
         #Get the bills page to start the session
-        req = self.get('http://www.azleg.gov/bills/')
+        req = self.get('http://www.azleg.gov/bills/', verify=False)
 
         session_form_url = 'http://www.azleg.gov/azlegwp/setsession.php'
         form = {
@@ -216,7 +216,7 @@ class AZBillScraper(BillScraper):
 
         bill_list_url = 'http://www.azleg.gov/bills/'
 
-        page = self.get(bill_list_url, cookies=req.cookies).content
+        page = self.get(bill_list_url, cookies=req.cookies, verify=False).content
         # There's an errant close-comment that browsers handle
         # but LXML gets really confused.
         page = page.replace('--!>', '-->')

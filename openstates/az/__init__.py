@@ -328,7 +328,7 @@ def session_list():
     import requests
     session = requests.Session()
 
-    data = session.get('http://www.azleg.gov/')
+    data = session.get('http://www.azleg.gov/', verify=False)
 
     #TODO: JSON at https://apps.azleg.gov/api/Session/
 

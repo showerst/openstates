@@ -183,7 +183,7 @@ class VABillScraper(BillScraper):
             date = datetime.datetime.strptime(date.strip(), '%m/%d/%y')
 
             # if action ends in (##-Y ##-N) remove that part
-            vrematch = self.vote_strip_re.match(action)
+            vrematch = False
             # The following conditional logic is messy to handle
             # Virginia's crazy and inconsistently formatted bill
             # histories. Someone less harried and tired than me
@@ -247,7 +247,7 @@ class VABillScraper(BillScraper):
                             cached_vote.add_source(BASE_URL + vote_url[0])
                         cached_action = action
                         continue
-                
+
                 if vote is not None:
                     bill.add_vote(vote)
 
@@ -311,8 +311,8 @@ class VABillScraper(BillScraper):
                     # create a bill
                     desc = bill.xpath('text()')[0].strip()
                     bill_type = {'B': 'bill',
-                                 'J': 'joint resolution',
-                                 'R': 'resolution'}[bill_id[1]]
+                                'J': 'joint resolution',
+                                'R': 'resolution'}[bill_id[1]]
                     bill = Bill(session, chamber, bill_id, desc,
                                 type=bill_type)
 

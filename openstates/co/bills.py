@@ -111,7 +111,7 @@ class COBillScraper(BillScraper, LXMLMixin):
         self.scrape_research_notes(bill, page)
         self.scrape_fiscal_notes(bill, page)
         self.scrape_committee_report(bill, page)
-        self.scrape_votes(bill, page)
+        #self.scrape_votes(bill, page)
         self.scrape_amendments(bill, page)
 
         self.save_bill(bill)
@@ -295,7 +295,8 @@ class COBillScraper(BillScraper, LXMLMixin):
     def scrape_vote(self, bill, vote_url, chamber, date):
         page = self.lxmlize(vote_url)
 
-        motion = page.xpath('//td/b/font[text()="MOTION:"]/../../following-sibling::td/font/text()')[0]
+        # motion = page.xpath('//td/b/font[text()="MOTION:"]/../../following-sibling::td/font/text()')[0]
+        motion = page.xpath('//td/b/font[text()="Motion:"]/../../following-sibling::td/.//b/font/text()')
 
         if 'withdrawn' not in motion:
             # Every table row after the one with VOTE in a td/div/b/font

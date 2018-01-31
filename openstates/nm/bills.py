@@ -450,15 +450,15 @@ class NMBillScraper(BillScraper):
                 else:
                     self.warning("Bad parse on the vote")
 
-            elif 'HVOTE' in suffix:
-                hv_text = self.scrape_vote(doc_path + fname)
-                if not hv_text:
-                    continue
-                vote = self.parse_house_vote(hv_text, doc_path + fname)
-                if vote:
-                    bill.add_vote(vote)
-                else:
-                    self.warning("Bad parse on the vote")
+            # elif 'HVOTE' in suffix:
+            #     hv_text = self.scrape_vote(doc_path + fname)
+            #     if not hv_text:
+            #         continue
+                # vote = self.parse_house_vote(hv_text, doc_path + fname)
+                # if vote:
+                #     bill.add_vote(vote)
+                # else:
+                #     self.warning("Bad parse on the vote")
 
             # committee reports
             elif re.match(r'\w{2,4}\d', suffix):
@@ -510,6 +510,9 @@ class NMBillScraper(BillScraper):
                     sane['no']=int(cellValue)
                 else:
                     sane['other']+=int(cellValue)
+
+        print(sane)
+        print(vote)
         # Make sure the parsed vote totals match up with counts in the total field
         if sane['yes'] != vote['yes_count'] or sane['no'] != vote['no_count'] or\
            sane['other'] != vote['other_count']:
@@ -614,7 +617,9 @@ class NMBillScraper(BillScraper):
                     if tableStop in cells[x][0]:
                         break
                     if x + 1 >= len(cells):
-                        self.warning('No vote found for {}'.format(cells[x]))
+                        name = ''.join(convert_sv_char(c) for c in cells[x-1][0])
+                        print(cells)
+                        self.warning('No vote found for {} {}'.format(cells[x], name))
                         continue
                     if cells[x+1][1] not in columnMap:
                         # Called one time for each column heading
@@ -625,6 +630,7 @@ class NMBillScraper(BillScraper):
                     # Fix some odd encoding issues
                     name = ''.join(convert_sv_char(c) for c in cells[x][0])
                     if 'Y' == voteCasted[0]:
+                        print(cells)
                         vote.yes(name)
                     elif 'N' == voteCasted[0]:
                         vote.no(name)
